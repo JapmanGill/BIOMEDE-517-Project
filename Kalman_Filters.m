@@ -3,7 +3,10 @@ clear all; close all; clc;
 
 load("contdata95.mat");
 
-% Uncomment to Add History
+% Channels with 80% Contribution to MSE
+ind = [22 24 27 30 31 41 47 53 63 65 78 84 86 89 95];
+
+% Change to Add History
 enable_history = false;
 
 if enable_history == true
@@ -21,9 +24,9 @@ if enable_history == true
     % Splitting into Training & Test Data
     
     train_X = X(history+1:floor(n_delay/2)+history,:)';
-    train_Y = Y_delay(1:floor(n_delay/2),:)';
+    train_Y = Y_delay(1:floor(n_delay/2),ind)';
     test_X = X(floor(n_delay/2)+history+1:n_delay+history,:)';
-    test_Y = Y_delay(floor(n_delay/2)+1:n_delay,:)';
+    test_Y = Y_delay(floor(n_delay/2)+1:n_delay,ind)';
 
 else
 %     X = [X, ones(size(X,1),1)];
@@ -31,8 +34,8 @@ else
     n_train = round(0.7*n);
     train_X = X(1:n_train,:)';
     test_X = X(n_train+1:end,:)';
-    train_Y = Y(1:n_train,:)';
-    test_Y = Y(n_train+1:end,:)';
+    train_Y = Y(1:n_train,ind)';
+    test_Y = Y(n_train+1:end,ind)';
 end
 %% Calculating Regressors
 
@@ -174,29 +177,45 @@ MSE = mean((pred_X' - test_X').^2, 'all')
 sigma = diag(corr(pred_X', test_X'))'
 disp(repmat('-',[1,40]));
 
-%% Finding Neurons with Max. Contribution
+%% Run to find Channels with Max. % Contribution
 
+percent_contr = 80;
+
+% Establish Baseline MSE
 A = (train_Y*train_Y')\train_Y*train_X';
 baseline = mean((train_X' - train_Y'*A).^2, 'all');
 
-min_ind = [];
+del_ind = [];
 
 X = train_X';
-for i = 1:10
+n = size(train_Y,1);
+roll_mse = [];
+
+% Removing Channels with Low Contributions
+while true
     delta_mse = zeros(n,1);
     for k = 1:n
-        Y = train_Y';
-        Y(:,min_ind) = [];
-
-        A = (Y'*Y)\Y'*X;
-        delta_mse(k) = baseline - mean((X - Y*A).^2, 'all');
+        if ismember(k,del_ind)
+            delta_mse(k) = nan;
+        else
+            Y = train_Y';
+            Y(:,[del_ind, k]) = [];
+    
+            A = (Y'*Y)\Y'*X;
+            delta_mse(k) = mean((X - Y*A).^2, 'all') - baseline;
+        end
     end
-
     [min_delta, i_min] = min(delta_mse);
-    min_ind = [min_ind, i_min];
-    n = n-1;
+
+    if min_delta/baseline*100 > (100 - percent_contr)
+        break;
+    else
+        del_ind = [del_ind, i_min];
+        roll_mse = [roll_mse, min_delta + baseline];
+    end
 end
 
-% ind = find(delta_mse<-baseline/100)
-% [srt_mse, ind] = sort(delta_mse);
-% plot(srt_mse)
+ind = 1:n;
+ind = ind(~ismember(ind,del_ind));
+disp('Channels with ' + string(percent_contr) + '% Contribution:');
+disp(ind)
