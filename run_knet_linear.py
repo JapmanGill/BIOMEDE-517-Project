@@ -62,10 +62,10 @@ KNet_model = KalmanNetNN()
 KNet_model.Build(sys_model)
 KNet_Pipeline.setModel(KNet_model)
 KNet_Pipeline.setTrainingParams(
-    n_Epochs=10, n_Batch=1, learningRate=1e-3, weightDecay=1e-5
+    n_Epochs=500, n_Batch=1, learningRate=1e-3, weightDecay=1e-5
 )
 
-# KNet_Pipeline.NNTrain(1, Y_train, X_train, 1, Y_val, X_val)
+KNet_Pipeline.NNTrain(1, Y_train, X_train, 1, Y_val, X_val)
 [
     KNet_MSE_test_linear_arr,
     KNet_MSE_test_linear_avg,

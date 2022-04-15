@@ -161,3 +161,4 @@ cython_debug/
 
 lin_nn_data
 *.ini
+*.code-workspace
