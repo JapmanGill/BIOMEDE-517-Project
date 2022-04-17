@@ -40,8 +40,8 @@ end
 %% Calculating Regressors
 
 % Initializing Variables
-n = size(test_X,2);
-n_st = size(test_X,1);
+n = size(train_X,2);
+n_st = size(train_X,1);
 
 % Non-Linear Observation Model
 h = @(X,B) B*[X(1,:); X(2,:); sqrt(X(1,:).^2 + X(2,:).^2); X(3,:); X(4,:); sqrt(X(3,:).^2 + X(4,:).^2)];

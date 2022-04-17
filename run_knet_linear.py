@@ -1,6 +1,8 @@
+import os
+dir = os.path.dirname(os.path.realpath('main_ekf.py'))
 import sys
-
-sys.path.append("G:/My Drive/UMich/Courses/W22/BME 517/BIOMEDE-Project/kalmannet")
+sys.path.append(dir + "/")
+sys.path.append(dir + "/" + "kalmannet")
 from Pipeline_KF_bme import Pipeline_KF
 from KalmanNet_nn_arch1 import KalmanNetNN
 from Linear_sysmdl_bme import SystemModel
@@ -9,17 +11,17 @@ import scipy.io as scio
 import numpy as np
 from datetime import datetime
 
-matA = scio.loadmat("lin_nn_data/A.mat")
-matC = scio.loadmat("lin_nn_data/C.mat")
-matQ = scio.loadmat("lin_nn_data/Q.mat")
-matW = scio.loadmat("lin_nn_data/W.mat")
-x_0 = scio.loadmat("lin_nn_data/x_0.mat")
-X_test = scio.loadmat("lin_nn_data/X_test.mat")
-Y_test = scio.loadmat("lin_nn_data/Y_test.mat")
-X_train = scio.loadmat("lin_nn_data/X_train.mat")
-Y_train = scio.loadmat("lin_nn_data/Y_train.mat")
-X_val = scio.loadmat("lin_nn_data/X_val.mat")
-Y_val = scio.loadmat("lin_nn_data/Y_val.mat")
+matA = scio.loadmat("data/A.mat")
+matC = scio.loadmat("data/C.mat")
+matQ = scio.loadmat("data/Q.mat")
+matW = scio.loadmat("data/W.mat")
+x_0 = scio.loadmat("data/x_0.mat")
+X_test = scio.loadmat("data/X_test.mat")
+Y_test = scio.loadmat("data/Y_test.mat")
+X_train = scio.loadmat("data/X_train.mat")
+Y_train = scio.loadmat("data/Y_train.mat")
+X_val = scio.loadmat("data/X_val.mat")
+Y_val = scio.loadmat("data/Y_val.mat")
 
 F = torch.tensor(matA["A"]).float()
 H = torch.tensor(matC["C"]).float()
