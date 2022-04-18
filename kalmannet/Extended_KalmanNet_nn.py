@@ -7,11 +7,13 @@ import torch.nn.functional as func
 # from filing_paths import path_model
 
 import sys
+
 # sys.path.insert(1, path_model)
 # from model import getJacobian
 
 ###?
 nGRU = 2
+
 
 class KalmanNetNN(torch.nn.Module):
 
@@ -26,9 +28,11 @@ class KalmanNetNN(torch.nn.Module):
     ### Initialize Kalman Gain Network ###
     ######################################
 
-    def Build(self, ssModel, infoString = 'fullInfo'):
+    def Build(self, ssModel, infoString="fullInfo"):
 
-        self.InitSystemDynamics(ssModel.f, ssModel.h, ssModel.m, ssModel.n, infoString = 'fullInfo')
+        self.InitSystemDynamics(
+            ssModel.f, ssModel.h, ssModel.m, ssModel.n, infoString="fullInfo"
+        )
         self.InitSequence(ssModel.m1x_0, ssModel.T)
 
         # Number of neurons in the 1st hidden layer
@@ -39,15 +43,14 @@ class KalmanNetNN(torch.nn.Module):
 
         self.InitKGainNet(H1_KNet, H2_KNet)
 
-
-
     def InitKGainNet(self, H1, H2):
 
         # Input Dimensions (+1 for time input)
         D_in = self.m + self.m + self.n  # F1,3,4
 
         # Output Dimensions
-        D_out = self.m * self.n;  # Kalman Gain
+        D_out = self.m * self.n
+        # Kalman Gain
 
         ###################
         ### Input Layer ###
@@ -102,15 +105,15 @@ class KalmanNetNN(torch.nn.Module):
     ##################################
     ### Initialize System Dynamics ###
     ##################################
-    def InitSystemDynamics(self, f, h, m, n, infoString = 'fullInfo'):
-        
-        if(infoString == 'partialInfo'):
-            self.fString ='ModInacc'
-            self.hString ='ObsInacc'
+    def InitSystemDynamics(self, f, h, m, n, infoString="fullInfo"):
+
+        if infoString == "partialInfo":
+            self.fString = "ModInacc"
+            self.hString = "ObsInacc"
         else:
-            self.fString ='ModAcc'
-            self.hString ='ObsAcc'
-        
+            self.fString = "ModAcc"
+            self.hString = "ObsAcc"
+
         # Set State Evolution Function
         self.f = f
         self.m = m
@@ -125,21 +128,19 @@ class KalmanNetNN(torch.nn.Module):
     def InitSequence(self, M1_0, T):
 
         self.m1x_posterior = torch.squeeze(M1_0)
-        self.m1x_posterior_previous = 0 # for t=0
-        print('init 1')
+        self.m1x_posterior_previous = 0  # for t=0
         self.T = T
         self.x_out = torch.empty(self.m, T)
-        print('init 2')
         self.state_process_posterior_0 = torch.squeeze(M1_0)
         self.m1x_prior_previous = self.m1x_posterior
-        print('init 3')
         # KGain saving
         self.i = 0
-        print(self.T, self.m, self.n)
-        self.KGain_array = self.KG_array = torch.zeros((self.T,self.m,self.n))
-        print(self.KGain_array.device, self.KG_array.device)
-        print(self.KGain_array.shape, self.KG_array.shape)
-        print('init 4')
+        # self.KGain_array = None
+        # self.KG_array = None
+        # self.KGain_array = self.KG_array = torch.zeros((self.T, self.m, self.n))
+        # print(self.KGain_array.device, self.KG_array.device)
+        # print(self.KGain_array.shape, self.KG_array.shape)
+
     ######################
     ### Compute Priors ###
     ######################
@@ -151,10 +152,12 @@ class KalmanNetNN(torch.nn.Module):
         self.m1y = torch.squeeze(self.h(self.m1x_prior))
 
         # Update Jacobians
-        #self.JFt = get_Jacobian(self.m1x_posterior, self.fString)
-        #self.JHt = get_Jacobian(self.m1x_prior, self.hString)
+        # self.JFt = get_Jacobian(self.m1x_posterior, self.fString)
+        # self.JHt = get_Jacobian(self.m1x_prior, self.hString)
 
-        self.state_process_prior_0 = torch.squeeze(self.f(self.state_process_posterior_0))
+        self.state_process_prior_0 = torch.squeeze(
+            self.f(self.state_process_posterior_0)
+        )
         self.obs_process_0 = torch.squeeze(self.h(self.state_process_prior_0))
 
     ##############################
@@ -165,13 +168,13 @@ class KalmanNetNN(torch.nn.Module):
         try:
             my_f1_0 = y - torch.squeeze(self.y_previous)
         except:
-            my_f1_0 = y - torch.squeeze(self.obs_process_0) # when t=0 
-        # my_f1_reshape = torch.squeeze(my_f1_0)       
+            my_f1_0 = y - torch.squeeze(self.obs_process_0)  # when t=0
+        # my_f1_reshape = torch.squeeze(my_f1_0)
         y_f1_norm = func.normalize(my_f1_0, p=2, dim=0, eps=1e-12, out=None)
 
         # Feature 2: yt - y_t+1|t
         # my_f2_0 = y - torch.squeeze(self.m1y)
-        # my_f2_reshape = torch.squeeze(my_f2_0)  
+        # my_f2_reshape = torch.squeeze(my_f2_0)
         # y_f2_norm = func.normalize(my_f2_reshape, p=2, dim=0, eps=1e-12, out=None)
 
         # Feature 3: x_t|t - x_t-1|t-1
@@ -180,26 +183,28 @@ class KalmanNetNN(torch.nn.Module):
         m1x_f3_norm = func.normalize(m1x_f3_reshape, p=2, dim=0, eps=1e-12, out=None)
 
         # Reshape and Normalize m1x Posterior
-        #m1x_post_0 = self.m1x_posterior - self.state_process_posterior_0 # Option 1
+        # m1x_post_0 = self.m1x_posterior - self.state_process_posterior_0 # Option 1
 
         # Featture 4: x_t|t - x_t|t-1
-        m1x_f4_0 = self.m1x_posterior - self.m1x_prior_previous 
-        #m1x_reshape = torch.squeeze(self.m1x_posterior) # Option 3
+        m1x_f4_0 = self.m1x_posterior - self.m1x_prior_previous
+        # m1x_reshape = torch.squeeze(self.m1x_posterior) # Option 3
         m1x_f4_reshape = torch.squeeze(m1x_f4_0)
         m1x_f4_norm = func.normalize(m1x_f4_reshape, p=2, dim=0, eps=1e-12, out=None)
 
         # Normalize y
-        #my_0 = y - torch.squeeze(self.obs_process_0) # Option 1
-        #my_0 = y - torch.squeeze(self.m1y) # Option 2
+        # my_0 = y - torch.squeeze(self.obs_process_0) # Option 1
+        # my_0 = y - torch.squeeze(self.m1y) # Option 2
         # my_0 = y
         # y_norm = func.normalize(my_0, p=2, dim=0, eps=1e-12, out=None)
-        #y_norm = func.normalize(y, p=2, dim=0, eps=1e-12, out=None);
+        # y_norm = func.normalize(y, p=2, dim=0, eps=1e-12, out=None);
 
         # Input for counting
-        count_norm = func.normalize(torch.tensor([self.i]).float(),dim=0, eps=1e-12,out=None)
+        count_norm = func.normalize(
+            torch.tensor([self.i]).float(), dim=0, eps=1e-12, out=None
+        )
 
         # KGain Net Input
-        KGainNet_in = torch.cat([y_f1_norm,m1x_f3_norm,m1x_f4_norm], dim=0)
+        KGainNet_in = torch.cat([y_f1_norm, m1x_f3_norm, m1x_f4_norm], dim=0)
 
         # Kalman Gain Network Step
         KG = self.KGain_step(KGainNet_in)
@@ -218,7 +223,7 @@ class KalmanNetNN(torch.nn.Module):
         self.step_KGain_est(y)
 
         # Save KGain in array
-        self.KGain_array[self.i] = self.KGain
+        # self.KGain_array[self.i] = self.KGain
         self.i += 1
 
         # Innovation
@@ -273,10 +278,10 @@ class KalmanNetNN(torch.nn.Module):
     ###############
     def forward(self, y):
         yt = torch.squeeze(y)
-        '''
+        """
         for t in range(0, self.T):
             self.x_out[:, t] = self.KNet_step(y[:, t])
-        '''
+        """
         self.x_out = self.KNet_step(yt)
 
         return self.x_out

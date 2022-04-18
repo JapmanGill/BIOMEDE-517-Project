@@ -244,9 +244,9 @@ class Pipeline_KF:
         self.Plot.NNPlot_epochs(
             self.N_Epochs,
             MSE_KF_dB_avg,
-            self.MSE_test_dB_avg,
-            self.MSE_cv_dB_epoch,
-            self.MSE_train_dB_epoch,
+            self.MSE_test_dB_avg.cpu(),
+            self.MSE_cv_dB_epoch.cpu(),
+            self.MSE_train_dB_epoch.cpu(),
         )
 
         self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
