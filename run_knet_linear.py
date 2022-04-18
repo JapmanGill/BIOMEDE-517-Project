@@ -1,6 +1,8 @@
 import os
-dir = os.path.dirname(os.path.realpath('main_ekf.py'))
+
+dir = os.path.dirname(os.path.realpath("main_ekf.py"))
 import sys
+
 sys.path.append(dir + "/")
 sys.path.append(dir + "/" + "kalmannet")
 from Pipeline_KF_bme import Pipeline_KF
@@ -67,11 +69,11 @@ KNet_Pipeline.setTrainingParams(
     n_Epochs=500, n_Batch=1, learningRate=1e-3, weightDecay=1e-5
 )
 
-KNet_Pipeline.NNTrain(1, Y_train, X_train, 1, Y_val, X_val)
+# KNet_Pipeline.NNTrain(1, Y_train, X_train, 1, Y_val, X_val)
 [
     KNet_MSE_test_linear_arr,
     KNet_MSE_test_linear_avg,
     KNet_MSE_test_dB_avg,
     KNet_test,
 ] = KNet_Pipeline.NNTest(1, Y_test, X_test)
-KNet_Pipeline.save()
+# KNet_Pipeline.save()
