@@ -77,7 +77,7 @@ KNet_Pipeline.setModel(KNet_model)
 
 # Define Training Parameters
 KNet_Pipeline.setTrainingParams(
-    n_Epochs=10, n_Batch=1, learningRate=1e-3, weightDecay=1e-5
+    n_Epochs=500, n_Batch=1, learningRate=1e-3, weightDecay=1e-5
 )
 
 # ToDo: Check the Arguments for Testing & Training
