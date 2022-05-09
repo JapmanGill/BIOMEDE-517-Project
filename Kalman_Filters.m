@@ -32,10 +32,11 @@ else
 %     X = [X, ones(size(X,1),1)];
     [n, n_neurons] = size(Y);
     n_train = round(0.7*n);
+    n_validation = round(0.15*n);
     train_X = X(1:n_train,:)';
-    test_X = X(n_train+1:end,:)';
+    test_X = X(n_train+n_validation+1:end,:)';
     train_Y = Y(1:n_train,ind)';
-    test_Y = Y(n_train+1:end,ind)';
+    test_Y = Y(n_train+n_validation+1:end,ind)';
 end
 %% Calculating Regressors
 
@@ -74,16 +75,19 @@ xt = test_X(:,1);
 Pt = W;
 Yt = test_Y;
 
+KGain_kf = zeros(4, 15, length(test_X)-1);
+
 pred_X = zeros(size(test_X));
 pred_X(:,1) = xt;
 
-for t = 2:n
+for t = 2:length(test_X)
     % Predict
     xt_hat = A*xt;
     Pt_hat = A*Pt*A' + W;
     
     % Innovate
     Kt = Pt_hat*C'/(C*Pt_hat*C' + Q);
+    KGain_kf(:,:,t-1) = Kt;
     
     % Update
     xt = xt_hat + Kt*(Yt(:,t) - C*xt_hat);
@@ -108,7 +112,7 @@ Yt = test_Y;
 pred_X = zeros(size(test_X));
 pred_X(:,1) = xt;
 
-for t = 2:n
+for t = 2:length(test_X)
     % Predict
     xt_hat = A*xt;
     Pt_hat = A*Pt*A' + W;
@@ -134,7 +138,7 @@ disp(repmat('-',[1,40]));
 
 % Initializing
 xt = test_X(:,1);
-Pt = W;
+Pt = W; 
 Yt = test_Y;
 
 pred_X = zeros(size(test_X));
@@ -143,7 +147,7 @@ pred_X(:,1) = xt;
 % Tuneable Kappa
 k = 0.01;
 
-for t = 2:n
+for t = 2:length(test_X)
     % Predict
     xt_hat = A*xt;
     Pt_hat = A*Pt*A' + W;
