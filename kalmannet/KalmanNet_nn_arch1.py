@@ -157,6 +157,8 @@ class KalmanNetNN(torch.nn.Module):
 
         # Kalman Gain Network Step
         KG = self.KGain_step(KGainNet_in)
+        # FIXME:
+        KG = KG / 100
 
         # Reshape Kalman Gain to a Matrix
         self.KGain = torch.reshape(KG, (self.m, self.n))

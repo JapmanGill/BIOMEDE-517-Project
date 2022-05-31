@@ -69,9 +69,11 @@ class Pipeline_KF:
 
             # Cross Validation Mode
             self.model.eval()
+            print("Cross validation...")
 
             for j in range(0, self.N_CV):
                 y_cv = cv_input[j, :, :]
+                # TODO: maybe improve the initial condition
                 self.model.InitSequence(self.ssModel.m1x_0)
 
                 x_out_cv = torch.empty(self.ssModel.m, self.ssModel.T_val)
@@ -98,6 +100,7 @@ class Pipeline_KF:
 
             # Training Mode
             self.model.train()
+            print("Training...")
 
             # Init Hidden State
             self.model.init_hidden()
