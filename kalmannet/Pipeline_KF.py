@@ -299,12 +299,12 @@ class Pipeline_KF:
         # Print Run Time
         print("Inference Time:", t)
 
-        return [
-            self.MSE_test_linear_arr,
-            self.MSE_test_linear_avg,
-            self.MSE_test_dB_avg,
-            x_out_test,
-        ]
+        # return [
+        #     self.MSE_test_linear_arr,
+        #     self.MSE_test_linear_avg,
+        #     self.MSE_test_dB_avg,
+        #     x_out_test,
+        # ]
 
     def PlotTrain_KF(self, MSE_KF_linear_arr, MSE_KF_dB_avg):
 

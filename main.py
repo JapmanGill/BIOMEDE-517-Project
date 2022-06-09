@@ -11,6 +11,7 @@ import scipy.io as scio
 import numpy as np
 from datetime import datetime
 import itertools
+import traceback
 
 matA = scio.loadmat("data/finger_flexion/A.mat")
 matC = scio.loadmat("data/finger_flexion/C.mat")
@@ -59,10 +60,10 @@ n_test = X_test.size()[0]
 
 
 modelFolder = "KNet/"
-epochs = 2
+epochs = 1
 n_batches = [64, 128]
 l_rates = [1e-3, 1e-4]
-w_decays = [1e-3, 1e-4]
+w_decays = [1e-5, 1e-6]
 for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
     print(n_batch, l_rate, w_decay)
     today = datetime.today()
@@ -106,14 +107,16 @@ for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
     )
 
     try:
-        pass
         pipeline.NNTrain(
             n_examples, Y_train, X_train, x_train_0, n_cv, Y_val, X_val, x_val_0
         )
-        pipeline.NNTest(n_test, Y_test, X_test, x_test_0)
-    except Exception as e:
-        print(f"[Error]: {e}")
+        # pipeline.NNTest(n_test, Y_test, X_test, x_test_0)
+    except:
+        print("Caught it!")
+        traceback.print_tb(sys.last_traceback)
     finally:
+        print("holaa")
+        traceback.print_tb(sys.last_traceback)
         pipeline.save()
         del pipeline
         del sys_model
