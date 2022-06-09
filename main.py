@@ -111,12 +111,10 @@ for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
             n_examples, Y_train, X_train, x_train_0, n_cv, Y_val, X_val, x_val_0
         )
         # pipeline.NNTest(n_test, Y_test, X_test, x_test_0)
-    except:
-        print("Caught it!")
-        traceback.print_tb(sys.last_traceback)
+    except Exception as e:
+        print(f"[Error]: {e}")
     finally:
-        print("holaa")
-        traceback.print_tb(sys.last_traceback)
+        print("saving pipeline...")
         pipeline.save()
         del pipeline
         del sys_model
