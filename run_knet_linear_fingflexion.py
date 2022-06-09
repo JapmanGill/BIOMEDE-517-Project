@@ -1,13 +1,10 @@
 import os
-
-dir = os.path.dirname(os.path.realpath("main_ekf.py"))
 import sys
 
-sys.path.append(dir + "/")
-sys.path.append(dir + "/" + "kalmannet")
-from Pipeline_KF_bme import Pipeline_KF
-from KalmanNet_nn_arch1 import KalmanNetNN
-from Linear_sysmdl_bme import SystemModel
+sys.path.append("kalmannet")
+from Pipeline_KF import Pipeline_KF
+from KalmanNet import KalmanNetNN
+from Linear_sysmdl import SystemModel
 import torch
 import scipy.io as scio
 import numpy as np

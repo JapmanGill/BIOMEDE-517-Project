@@ -1,0 +1,8 @@
+{
+    "python.analysis.extraPaths": [
+        "C:/Users/lhcub/anaconda3/envs/py35/Lib",
+        "C:/Users/lhcub/anaconda3/envs/py35/Lib/site-packages",
+        "C:/Users/lhcub/anaconda3/envs/gaitdec/lib/site-packages",
+        "./kalmannet"
+    ]
+}
