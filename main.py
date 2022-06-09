@@ -60,10 +60,10 @@ n_test = X_test.size()[0]
 
 
 modelFolder = "KNet/"
-epochs = 1
+epochs = 80
 n_batches = [64, 128]
 l_rates = [1e-3, 1e-4]
-w_decays = [1e-5, 1e-6]
+w_decays = [1e-4, 1e-5]
 for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
     print(n_batch, l_rate, w_decay)
     today = datetime.today()
