@@ -7,31 +7,28 @@ from Pipeline_KF import Pipeline_KF
 from KalmanNet import KalmanNetNN
 from Linear_sysmdl import SystemModel
 import torch
+from torch.utils.data import DataLoader
 import scipy.io as scio
 import numpy as np
 from datetime import datetime
 import itertools
 import traceback
 
+from dataset import FingerFlexionDataset
+
+batch_data = scio.loadmat(
+    "data/finger_flexion/batch_data_32ms_20chan_5bins_overlapping.mat"
+)
+
 matA = scio.loadmat("data/finger_flexion/A.mat")
-matC = scio.loadmat("data/finger_flexion/C.mat")
 matQ = scio.loadmat("data/finger_flexion/Q.mat")
 matW = scio.loadmat("data/finger_flexion/W.mat")
-x_0 = scio.loadmat("data/finger_flexion/x_0.mat")
-X_test = scio.loadmat("data/finger_flexion/X_test.mat")
-Y_test = scio.loadmat("data/finger_flexion/Y_test.mat")
-X_train = scio.loadmat("data/finger_flexion/X_train.mat")
-Y_train = scio.loadmat("data/finger_flexion/Y_train.mat")
-X_val = scio.loadmat("data/finger_flexion/X_val.mat")
-Y_val = scio.loadmat("data/finger_flexion/Y_val.mat")
 
-batch_data = scio.loadmat("data/finger_flexion/batch_data_32ms_15chan_100bins.mat")
-
-F = torch.tensor(matA["A"]).float()
+F = torch.tensor(batch_data["A"]).float()
 H = torch.tensor(batch_data["C"]).float()
-Q = torch.tensor(matW["W"]).float()
-R = torch.tensor(matQ["Q"]).float()
-# x_test_0 = torch.tensor(batch_data["bx_test_0"]).t().float()
+Q = torch.tensor(batch_data["W"]).float()
+R = torch.tensor(batch_data["Q"]).float()
+
 x_train_0 = torch.tensor(batch_data["bx_train_0"]).float()
 x_val_0 = torch.tensor(batch_data["bx_val_0"]).float()
 P_0 = Q
@@ -41,6 +38,10 @@ X_train = torch.tensor(batch_data["bX_train"]).float()
 Y_train = torch.tensor(batch_data["bY_train"]).float()
 X_val = torch.tensor(batch_data["bX_val"]).float()
 Y_val = torch.tensor(batch_data["bY_val"]).float()
+X_train_mean = torch.tensor(batch_data["X_train_mean"]).float()
+X_train_std = torch.tensor(batch_data["X_train_std"]).float()
+Y_train_mean = torch.tensor(batch_data["Y_train_mean"]).float()
+Y_train_std = torch.tensor(batch_data["Y_train_std"]).float()
 
 # Add extra dimension
 X_test = X_test[None, :, :]
@@ -58,12 +59,22 @@ n_examples = X_train.size()[0]
 n_cv = X_val.size()[0]
 n_test = X_test.size()[0]
 
+# dataset_train = FingerFlexionDataset(X_train, Y_train, x_train_0)
+# dataset_val = FingerFlexionDataset(
+#     X_val, Y_val, x_val_0, X_train_mean, X_train_std, Y_train_mean, Y_train_std
+# )
+# train_dataloader = DataLoader(dataset_train, batch_size=64, shuffle=True)
+# val_dataloader = DataLoader(dataset_val)
+
 
 modelFolder = "KNet/"
-epochs = 80
-n_batches = [64, 128]
-l_rates = [1e-3, 1e-4]
-w_decays = [1e-4, 1e-5]
+epochs = 500
+# n_batches = [64, 128]
+# l_rates = [1e-3, 1e-4]
+# w_decays = [1e-4, 1e-5]
+n_batches = [64]
+l_rates = [1e-4]
+w_decays = [1e-5]
 for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
     print(n_batch, l_rate, w_decay)
     today = datetime.today()
@@ -94,7 +105,7 @@ for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
 
     pipeline = Pipeline_KF(strTime, "models", f"KNet_fingflexion_{strTime}")
     sys_model = SystemModel(F, Q, H, R, T, T_val, T_test)
-    sys_model.InitSequence(x_0, P_0)
+    # sys_model.InitSequence(x_0, P_0)
     pipeline.setssModel(sys_model)
     KNet_model = KalmanNetNN()
     KNet_model.Build(sys_model)

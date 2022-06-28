@@ -63,7 +63,7 @@ function [adjX, adjY] = adjustFeats(X, Y, varargin)
 	end
 	adjX = zeros(size(X, 1)-hist, nNeurons*(hist+1));
 	for samp = hist+1:size(X, 1)
-		adjX(samp - hist, :) = reshape(flipud(X(samp - hist:samp, :))', [1, nNeurons * (hist+1)]);
+		adjX(samp - hist, :) = reshape(X(samp - hist:samp, :)', [1, nNeurons * (hist+1)]);
 	end
 	adjY = Y(hist+1:end, :);
 	

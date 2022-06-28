@@ -146,7 +146,7 @@ class Pipeline_KF:
                 corr = np.zeros(4)
                 for i in range(4):
                     corr[i] = np.corrcoef(
-                        x_out_training[i, :].detach().cpu(), train_target[i, :].cpu()
+                        x_out_training[i, :].detach().cpu(), train_target[n_e,i, :].cpu()
                     )[0, 1]
                 MSE_train_linear_batch[j] = LOSS.item()
                 corr_train_batch[j] = np.mean(corr)
