@@ -5,6 +5,7 @@ import time
 from Plot import Plot
 import numpy as np
 import wandb
+from utils.utils import compute_correlation
 
 
 class Pipeline_KF:
@@ -42,42 +43,184 @@ class Pipeline_KF:
             self.model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay
         )
 
+    def new_train(self, train_dataloader, cv_dataloader, vel_only=False):
+        optimal_mse = 1000
+        optimal_correlation = torch.empty([4])
+        optimal_epoch = -1
+        for epoch in range(self.N_Epochs):
+            print(f"Epoch {epoch+1}...")
+            # Training
+            self.model.train()
+            print("Training...")
+
+            train_loss = torch.empty([len(train_dataloader), 4])
+            train_corr = torch.empty([len(train_dataloader), 4])
+            iteration_table = wandb.Table(
+                columns=[
+                    "iteration",
+                    "MSE pos idx",
+                    "MSE pos mrs",
+                    "MSE vel idx",
+                    "MSE vel mrs",
+                    "Corr pos idx",
+                    "Corr pos mrs",
+                    "Corr vel idx",
+                    "Corr vel mrs",
+                ]
+            )
+            for i, (y, x, x_0) in enumerate(train_dataloader):
+                # Initialize hidden state: necessary for backprop
+                self.model.init_hidden()
+                self.optimizer.zero_grad()
+                # Initialize sequence for KalmanFilter
+                self.model.InitSequence(x_0[0, :])
+                # Do forward pass of full batch
+                x_hat = self.model.forward_batch(y)
+                # Compute MSE loss
+                loss = self.loss_fn(x_hat, x)
+                if vel_only:
+                    loss = self.loss_fn(x_hat[:, 2:, :], x[:, 2:, :])
+                train_loss[i, :] = ((x_hat - x) ** 2).mean(axis=[0, 2]).detach()
+                # Backpropagate and update weights
+                loss.backward()
+
+                # Clip gradients to avoid exploding gradients
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.01)
+                self.optimizer.step()
+                # Compute correlation between x and x_hat
+                corr = compute_correlation(x.detach().cpu(), x_hat.detach().cpu())
+                train_corr[i, :] = torch.nanmean(torch.from_numpy(corr), 0)
+                print("Training", loss.item(), np.nanmean(corr, 0))
+                iteration_table.add_data(
+                    i, *torch.cat((train_loss[i, :], train_corr[i, :])).tolist()
+                )
+
+            log_dict = {
+                "mse_train": np.nanmean(train_loss, 0).tolist(),
+                "corr_train": np.nanmean(train_corr, 0).tolist(),
+                "epoch": epoch,
+                "iteration_table": iteration_table,
+            }
+
+            # Validation
+            self.model.eval()
+            print("Validation...")
+
+            val_loss = torch.empty([len(cv_dataloader), 4])
+            val_corr = torch.empty([len(cv_dataloader), 4])
+            for i, (y, x, x_0) in enumerate(cv_dataloader):
+                # Initialize sequence for KalmanFilter
+                self.model.InitSequence(x_0[0, :])
+                # Do forward pass of full batch
+                x_hat = self.model.forward_batch(y)
+                # Compute MSE loss
+                loss = self.loss_fn(x_hat, x)
+                val_loss[i, :] = ((x_hat - x) ** 2).mean(axis=[0, 2]).detach()
+                # Compute correlation between x and x_hat
+                corr = compute_correlation(x.detach().cpu(), x_hat.detach().cpu())
+                val_corr[i, :] = torch.from_numpy(corr)
+
+            mse = np.nanmean(val_loss)
+            print("Validation", mse, np.nanmean(val_corr, 0).tolist())
+            if mse < optimal_mse:
+                optimal_mse = mse
+                optimal_correlation = np.nanmean(val_corr, 0).tolist()
+                optimal_epoch = epoch
+                torch.save(self.model, self.modelFileName)
+                print(f"Saving model with MSE {optimal_mse}")
+
+            log_dict.update(
+                {
+                    "mse_cv": np.nanmean(val_loss, 0).tolist(),
+                    "corr_cv": np.nanmean(val_corr, 0).tolist(),
+                    "optimal_mse_cv": optimal_mse,
+                    "optimal_correlation_cv": optimal_correlation,
+                    "optimal_epoch": optimal_epoch,
+                }
+            )
+            wandb.log(log_dict)
+
     def NNTrain(
-        self,
-        n_Examples,
-        train_input,
-        train_target,
-        train_x0,
-        n_CV,
-        cv_input,
-        cv_target,
-        cv_x0,
+        self, n_Examples, train_dataloader, n_CV, cv_dataloader, only_vel=False
     ):
 
         self.N_E = n_Examples
         self.N_CV = n_CV
 
-        MSE_cv_linear_batch = torch.empty([self.N_CV])
-        self.MSE_cv_linear_epoch = torch.empty([self.N_Epochs])
-        self.MSE_cv_dB_epoch = torch.empty([self.N_Epochs])
+        MSE_cv_batch = torch.empty([self.N_CV])
+        self.MSE_cv_epoch = torch.empty([self.N_Epochs])
         corr_cv_batch = torch.empty([self.N_CV])
         self.corr_cv_epoch = torch.empty([self.N_Epochs])
 
-        MSE_train_linear_batch = torch.empty([self.N_B])
-        self.MSE_train_linear_epoch = torch.empty([self.N_Epochs])
-        self.MSE_train_dB_epoch = torch.empty([self.N_Epochs])
-        corr_train_batch = torch.empty([self.N_CV])
+        MSE_train_batch = torch.empty([self.N_B])
+        MSE_train_batch_epoch = torch.empty([len(train_dataloader)])
+        self.MSE_train_epoch = torch.empty([self.N_Epochs])
+        corr_train_batch = torch.empty([self.N_B])
+        corr_train_batch_epoch = torch.empty([len(train_dataloader)])
         self.corr_train_epoch = torch.empty([self.N_Epochs])
 
         ##############
         ### Epochs ###
         ##############
 
-        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_opt = 1000
         self.MSE_cv_idx_opt = 0
 
         for ti in range(0, self.N_Epochs):
             print(f"Epoch {ti+1}...")
+
+            # Training
+            self.model.train()
+            # Init Hidden State
+            for i, (y, x_target, x_0) in enumerate(train_dataloader):
+                loss_sum = 0
+                if i == 0:
+                    self.model.InitSequence(x_0[0, :])
+                # Iterate over the first dimension of y (the batch dimension)
+                self.optimizer.zero_grad()
+                for j in range(0, y.shape[0]):
+                    self.model.init_hidden()
+                    y_batch, x_batch, x_0_batch = (
+                        y[j, :, :],
+                        x_target[j, :, :],
+                        x_0[j, :],
+                    )
+
+                    # # Initialize sequence
+                    # self.model.InitSequence(x_0_batch)
+                    # Iterate over the sequence
+                    x_out_training = self.model.forward_sequence(y_batch)
+                    if only_vel:
+                        loss = self.loss_fn(x_out_training[2:, :], x_batch[2:, :])
+                        loss.backward()
+                    else:
+                        loss = self.loss_fn(x_out_training, x_batch)
+                        loss.backward()
+
+                    MSE_train_batch[j] = loss.item()
+
+                    # Compute correlation
+                    corr = compute_correlation(
+                        x_out_training.detach().cpu(), x_batch.cpu()
+                    )
+                    if only_vel:
+                        corr_train_batch[j] = np.mean(corr[2:])
+                    else:
+                        corr_train_batch[j] = np.mean(corr)
+                    del loss
+                # Backpropagation (update gradients)
+                # loss_sum = loss_sum / y.shape[0]
+                # loss_sum.backward()
+                self.optimizer.step()
+                # Update weights once per every batch
+                # self.optimizer.step()
+                MSE_train_batch_epoch[i] = torch.nanmean(MSE_train_batch)
+                corr_train_batch_epoch[i] = torch.nanmean(corr_train_batch)
+                print(torch.mean(MSE_train_batch), torch.nanmean(corr_train_batch))
+
+            # Average
+            self.MSE_train_epoch[ti] = torch.mean(MSE_train_batch_epoch)
+            self.corr_train_epoch[ti] = torch.mean(corr_train_batch)
 
             #################################
             ### Validation Sequence Batch ###
@@ -87,126 +230,62 @@ class Pipeline_KF:
             self.model.eval()
             print("Cross validation...")
 
-            for j in range(0, self.N_CV):
-                y_cv = cv_input[j, :, :]
-                self.model.InitSequence(cv_x0[j, :])
+            for j, (cv_input, cv_target, cv_x0) in enumerate(cv_dataloader):
+                y_cv = torch.squeeze(cv_input)
+                self.model.InitSequence(cv_x0[0, :, :])
 
-                x_out_cv = torch.empty(self.ssModel.m, self.ssModel.T_val)
-                for t in range(0, self.ssModel.T_val):
-                    x_out_cv[:, t] = self.model(y_cv[:, t].float())
+                x_out_cv = self.model.forward_sequence(y_cv.float())
 
-                # Compute Training Loss
-                MSE_cv_linear_batch[j] = self.loss_fn(
-                    x_out_cv, cv_target[j, :, :]
-                ).item()
+                # Compute CV Loss
+                if only_vel:
+                    MSE_cv_batch[j] = self.loss_fn(x_out_cv[2:, :], cv_target[0, 2:, :])
+                else:
+                    MSE_cv_batch[j] = self.loss_fn(
+                        x_out_cv, torch.squeeze(cv_target)
+                    ).item()
                 # Compute correlation
-                corr = np.zeros(4)
-                for i in range(4):
-                    corr[i] = np.corrcoef(
-                        x_out_cv.detach().cpu(), cv_target[j, :, :].cpu()
-                    )[0, 1]
-                corr_cv_batch[j] = np.mean(corr)
+                corr = compute_correlation(x_out_cv.detach().cpu(), cv_target.cpu())
+                if only_vel:
+                    corr_cv_batch[j] = np.mean(corr[2:])
+                else:
+                    corr_cv_batch[j] = np.mean(corr)
 
             # Average
-            self.MSE_cv_linear_epoch[ti] = torch.mean(MSE_cv_linear_batch)
-            self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
-            self.corr_cv_epoch[ti] = torch.mean(corr_cv_batch)
+            self.MSE_cv_epoch[ti] = torch.nanmean(MSE_cv_batch)
+            self.corr_cv_epoch[ti] = torch.nanmean(corr_cv_batch)
 
-            if self.MSE_cv_dB_epoch[ti] < self.MSE_cv_dB_opt:
-                self.MSE_cv_dB_opt = self.MSE_cv_dB_epoch[ti]
+            if self.MSE_cv_epoch[ti] < self.MSE_cv_opt:
+                self.MSE_cv_opt = self.MSE_cv_epoch[ti]
                 self.MSE_cv_idx_opt = ti
                 torch.save(self.model, self.modelFileName)
-
-            ###############################
-            ### Training Sequence Batch ###
-            ###############################
-
-            # Training Mode
-            self.model.train()
-            print("Training...")
-
-            # Init Hidden State
-            self.model.init_hidden()
-
-            Batch_Optimizing_LOSS_sum = 0
-
-            for j in range(0, self.N_B):
-                n_e = random.randint(0, self.N_E - 1)
-
-                y_training = train_input[n_e, :, :]
-                self.model.InitSequence(train_x0[n_e, :])
-
-                x_out_training = torch.empty(self.ssModel.m, self.ssModel.T)
-                for t in range(0, self.ssModel.T):
-                    x_out_training[:, t] = self.model(y_training[:, t])
-
-                # Compute Training Loss
-                LOSS = self.loss_fn(x_out_training, train_target[n_e, :, :])
-                # Compute correlation
-                corr = np.zeros(4)
-                for i in range(4):
-                    corr[i] = np.corrcoef(
-                        x_out_training[i, :].detach().cpu(), train_target[n_e,i, :].cpu()
-                    )[0, 1]
-                MSE_train_linear_batch[j] = LOSS.item()
-                corr_train_batch[j] = np.mean(corr)
-
-                Batch_Optimizing_LOSS_sum = Batch_Optimizing_LOSS_sum + LOSS
-
-            # Average
-            self.MSE_train_linear_epoch[ti] = torch.mean(MSE_train_linear_batch)
-            self.MSE_train_dB_epoch[ti] = 10 * torch.log10(
-                self.MSE_train_linear_epoch[ti]
-            )
-            self.corr_train_epoch[ti] = torch.mean(corr_train_batch)
-
-            ##################
-            ### Optimizing ###
-            ##################
-
-            # Before the backward pass, use the optimizer object to zero all of the
-            # gradients for the variables it will update (which are the learnable
-            # weights of the model). This is because by default, gradients are
-            # accumulated in buffers( i.e, not overwritten) whenever .backward()
-            # is called. Checkout docs of torch.autograd.backward for more details.
-            self.optimizer.zero_grad()
-
-            # Backward pass: compute gradient of the loss with respect to model
-            # parameters
-            Batch_Optimizing_LOSS_mean = Batch_Optimizing_LOSS_sum / self.N_B
-            Batch_Optimizing_LOSS_mean.backward()
-
-            # Calling the step function on an Optimizer makes an update to its
-            # parameters
-            self.optimizer.step()
 
             ########################
             ### Training Summary ###
             ########################
             print(f"Epoch {ti+1}")
             print(
-                f"MSE_train (dB):{self.MSE_train_dB_epoch[ti]:.3f}\tCorr_train: {self.corr_train_epoch[ti]:.3f}"
+                f"MSE_train:{self.MSE_train_epoch[ti]:.3f}\tCorr_train: {self.corr_train_epoch[ti]:.3f}"
             )
             print(
-                f"MSE_cv (dB):{self.MSE_cv_dB_epoch[ti]:.3f}\tCorr_cv: {self.corr_cv_epoch[ti]:.3f}"
+                f"MSE_cv:{self.MSE_cv_epoch[ti]:.3f}\tCorr_cv: {self.corr_cv_epoch[ti]:.3f}"
             )
             log_dict = {
-                "mse_train_db": self.MSE_train_dB_epoch[ti],
+                "mse_train": self.MSE_train_epoch[ti],
                 "corr_train": self.corr_train_epoch[ti],
-                "mse_cv_db": self.MSE_cv_dB_epoch[ti],
+                "mse_cv": self.MSE_cv_epoch[ti],
                 "corr_cv": self.corr_cv_epoch[ti],
             }
 
             if ti >= 1:
-                d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
+                d_train = self.MSE_train_epoch[ti] - self.MSE_train_epoch[ti - 1]
                 d_corr_train = self.corr_train_epoch[ti] - self.corr_train_epoch[ti - 1]
-                d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
+                d_cv = self.MSE_cv_epoch[ti] - self.MSE_cv_epoch[ti - 1]
                 d_corr_cv = self.corr_cv_epoch[ti] - self.corr_cv_epoch[ti - 1]
                 log_dict.update(
                     {
-                        "d_train_db": d_train,
+                        "d_train": d_train,
                         "d_train_corr": d_corr_train,
-                        "d_cv_db": d_cv,
+                        "d_cv": d_cv,
                         "d_cv_corr": d_corr_cv,
                     }
                 )
@@ -218,13 +297,13 @@ class Pipeline_KF:
 
             print(f"Optimal epoch {self.MSE_cv_idx_opt+1}")
             print(
-                f"\tMSE_cv (dB): {self.MSE_cv_dB_epoch[self.MSE_cv_idx_opt]:.3f}\tCorr_cv: {self.corr_cv_epoch[self.MSE_cv_idx_opt]:.3f}"
+                f"\tMSE_cv (dB): {self.MSE_cv_epoch[self.MSE_cv_idx_opt]:.3f}\tCorr_cv: {self.corr_cv_epoch[self.MSE_cv_idx_opt]:.3f}"
             )
             log_dict.update(
                 {
                     "optimal_epoch": self.MSE_cv_idx_opt + 1,
                     "current_epoch": ti + 1,
-                    "optimal_cv_mse_db": self.MSE_cv_dB_epoch[self.MSE_cv_idx_opt],
+                    "optimal_cv_mse": self.MSE_cv_epoch[self.MSE_cv_idx_opt],
                     "optimal_cv_corr": self.corr_cv_epoch[self.MSE_cv_idx_opt],
                 }
             )

@@ -16,13 +16,8 @@ import traceback
 
 from dataset import FingerFlexionDataset
 
-batch_data = scio.loadmat(
-    "data/finger_flexion/batch_data_32ms_20chan_5bins_overlapping.mat"
-)
-
-matA = scio.loadmat("data/finger_flexion/A.mat")
-matQ = scio.loadmat("data/finger_flexion/Q.mat")
-matW = scio.loadmat("data/finger_flexion/W.mat")
+filename = "data/2022-06-13/batch_data_32ms_12chan_50bins_nonoverlapping.mat"
+batch_data = scio.loadmat(filename)
 
 F = torch.tensor(batch_data["A"]).float()
 H = torch.tensor(batch_data["C"]).float()
@@ -59,23 +54,25 @@ n_examples = X_train.size()[0]
 n_cv = X_val.size()[0]
 n_test = X_test.size()[0]
 
-# dataset_train = FingerFlexionDataset(X_train, Y_train, x_train_0)
-# dataset_val = FingerFlexionDataset(
-#     X_val, Y_val, x_val_0, X_train_mean, X_train_std, Y_train_mean, Y_train_std
-# )
-# train_dataloader = DataLoader(dataset_train, batch_size=64, shuffle=True)
-# val_dataloader = DataLoader(dataset_val)
+dataset_train = FingerFlexionDataset(
+    X_train, Y_train, x_train_0, X_train_mean, X_train_std, Y_train_mean, Y_train_std
+)
+dataset_val = FingerFlexionDataset(
+    X_val, Y_val, x_val_0, X_train_mean, X_train_std, Y_train_mean, Y_train_std
+)
+train_dataloader = DataLoader(dataset_train, batch_size=4, shuffle=False)
+val_dataloader = DataLoader(dataset_val)
 
 
 modelFolder = "KNet/"
-epochs = 500
-# n_batches = [64, 128]
-# l_rates = [1e-3, 1e-4]
-# w_decays = [1e-4, 1e-5]
-n_batches = [64]
-l_rates = [1e-4]
+epochs = 10
+n_batches = [8, 12]
+l_rates = [1e-2, 1e-3]
 w_decays = [1e-5]
-for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
+only_vels = [False, True]
+for n_batch, w_decay, l_rate, only_vel in itertools.product(
+    n_batches, w_decays, l_rates, only_vels
+):
     print(n_batch, l_rate, w_decay)
     today = datetime.today()
     now = datetime.now()
@@ -89,11 +86,14 @@ for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
         "l_rate": l_rate,
         "n_batch": n_batch,
         "w_decay": w_decay,
+        "only_vel": only_vel,
         "CAR": False,
         "binsize": 32,
-        "num_channels": 15,
-        "seq_length": 100,
+        "num_channels": 12,
+        "seq_length": 50,
         "distinct_x0": True,
+        "overlapping": False,
+        "filename": filename,
     }
     run = wandb.init(
         project="kalman-net",
@@ -118,10 +118,11 @@ for n_batch, w_decay, l_rate in itertools.product(n_batches, w_decays, l_rates):
     )
 
     try:
-        pipeline.NNTrain(
-            n_examples, Y_train, X_train, x_train_0, n_cv, Y_val, X_val, x_val_0
-        )
-        # pipeline.NNTest(n_test, Y_test, X_test, x_test_0)
+        # pipeline.NNTrain(
+        #     n_examples, train_dataloader, n_cv, val_dataloader, only_vel=only_vel
+        # )
+        pipeline.new_train(train_dataloader, val_dataloader, only_vel)
+    # pipeline.NNTest(n_test, Y_test, X_test, x_test_0)
     except Exception as e:
         print(f"[Error]: {e}")
     finally:

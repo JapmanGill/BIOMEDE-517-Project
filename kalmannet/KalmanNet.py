@@ -158,7 +158,7 @@ class KalmanNetNN(torch.nn.Module):
         # Kalman Gain Network Step
         KG = self.KGain_step(KGainNet_in)
         # FIXME:
-        KG = KG / 1000
+        KG = KG / 10000
 
         # Reshape Kalman Gain to a Matrix
         self.KGain = torch.reshape(KG, (self.m, self.n))
@@ -223,6 +223,20 @@ class KalmanNetNN(torch.nn.Module):
     def forward(self, yt):
         yt = yt.to(self.device, non_blocking=True)
         return self.KNet_step(yt)
+
+    def forward_sequence(self, y_seq):
+        y_seq = y_seq.to(self.device, non_blocking=True)
+        x_out = torch.empty(self.m, y_seq.shape[1])
+        for t in range(y_seq.shape[1]):
+            x_out[:, t] = self.forward(y_seq[:, t])
+        return x_out
+
+    def forward_batch(self, y_batch):
+        y_batch = y_batch.to(self.device, non_blocking=True)
+        x_out = torch.empty(y_batch.shape[0], self.m, y_batch.shape[2])
+        for b in range(y_batch.shape[0]):
+            x_out[b, :, :] = self.forward_sequence(y_batch[b, :, :])
+        return x_out
 
     #########################
     ### Init Hidden State ###
