@@ -67,7 +67,7 @@ val_dataloader = DataLoader(dataset_val)
 modelFolder = "KNet/"
 epochs = 10
 n_batches = [8, 12]
-l_rates = [1e-2, 1e-3]
+l_rates = [1e-3, 1e-4]
 w_decays = [1e-5]
 only_vels = [False, True]
 for n_batch, w_decay, l_rate, only_vel in itertools.product(
