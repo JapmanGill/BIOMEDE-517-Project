@@ -16,7 +16,7 @@ import traceback
 
 from dataset import FingerFlexionDataset
 
-filename = "data/2022-06-13/batch_data_32ms_12chan_50bins_nonoverlapping.mat"
+filename = "data/2021-04-12/batch_data_32ms_12chan_50bins_nonoverlapping.mat"
 batch_data = scio.loadmat(filename)
 
 F = torch.tensor(batch_data["A"]).float()
@@ -65,11 +65,11 @@ val_dataloader = DataLoader(dataset_val)
 
 
 modelFolder = "KNet/"
-epochs = 10
-n_batches = [8, 12]
-l_rates = [1e-3, 1e-4]
+epochs = 150
+n_batches = [64]
+l_rates = [1e-3]
 w_decays = [1e-5]
-only_vels = [False, True]
+only_vels = [False]
 for n_batch, w_decay, l_rate, only_vel in itertools.product(
     n_batches, w_decays, l_rates, only_vels
 ):
