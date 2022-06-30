@@ -1,6 +1,6 @@
 clear;
 close all;
-load contdata95.mat
+load data/contdata95.mat
 
 channels_to_keep = [22 24 27 30 31 41 47 53 63 65 78 84 86 89 95];
 
