@@ -116,6 +116,8 @@ class KalmanNetNN(torch.nn.Module):
 
         self.state_process_posterior_0 = M1_0.to(self.device, non_blocking=True)
 
+        self.last_y = torch.zeros(self.n).to(self.device, non_blocking=True)
+
     ######################
     ### Compute Priors ###
     ######################
@@ -151,6 +153,12 @@ class KalmanNetNN(torch.nn.Module):
         # Feature 2: yt - y_t+1|t
         dm1y = y - torch.squeeze(self.m1y)
         dm1y_norm = func.normalize(dm1y, p=2, dim=0, eps=1e-12, out=None)
+
+        # Feature 1: yt-yt-1
+        # Won't normalize as we expect it to be pre-normalized
+        # dm1y_prev = y - self.last_y
+        # dm1y_norm_prev = func.normalize(dm1y, p=2, dim=0, eps=1e-12, out=None)
+        # self.last_y = y
 
         # KGain Net Input
         KGainNet_in = torch.cat([dm1y_norm, dm1x_norm], dim=0)

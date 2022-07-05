@@ -34,7 +34,7 @@ class FingerFlexionDataset(Dataset):
         x_0 = self.X_0[index, :]
         if self.normalize:
             # x = torch.div(x - self.x_mean[0, :, None], self.x_std[0, :, None])
-            # y = torch.div(y - self.y_mean[0, :, None], self.y_std[0, :, None])
+            y = torch.div(y - self.y_mean[0, :, None], self.y_std[0, :, None])
             # x_0 = torch.div(x_0 - self.x_mean[0, :, None], self.x_std[0, :, None])
             pass
         return y, x, x_0

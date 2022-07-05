@@ -16,7 +16,9 @@ import traceback
 
 from dataset import FingerFlexionDataset
 
-filename = "data/2021-04-12/batch_data_32ms_12chan_50bins_nonoverlapping.mat"
+filename = (
+    "data/2022-04-15_run11/batch_data_32ms_12chan_50bins_nonoverlapping_onlyvel.mat"
+)
 batch_data = scio.loadmat(filename)
 
 F = torch.tensor(batch_data["A"]).float()
@@ -60,16 +62,14 @@ dataset_train = FingerFlexionDataset(
 dataset_val = FingerFlexionDataset(
     X_val, Y_val, x_val_0, X_train_mean, X_train_std, Y_train_mean, Y_train_std
 )
-train_dataloader = DataLoader(dataset_train, batch_size=4, shuffle=False)
-val_dataloader = DataLoader(dataset_val)
 
 
 modelFolder = "KNet/"
-epochs = 150
-n_batches = [64]
-l_rates = [1e-3]
-w_decays = [1e-5]
-only_vels = [False]
+epochs = 30
+n_batches = [12, 16, 32]
+l_rates = [1e-3, 1e-4, 1e-5]
+w_decays = [1e-6, 1e-5]
+only_vels = [True]
 for n_batch, w_decay, l_rate, only_vel in itertools.product(
     n_batches, w_decays, l_rates, only_vels
 ):
@@ -79,6 +79,9 @@ for n_batch, w_decay, l_rate, only_vel in itertools.product(
     strToday = today.strftime("%m_%d_%y")
     strNow = now.strftime("%H_%M_%S")
     strTime = strToday + "__" + strNow
+
+    train_dataloader = DataLoader(dataset_train, batch_size=n_batch, shuffle=False)
+    val_dataloader = DataLoader(dataset_val)
 
     # Start run
     config = {
@@ -94,6 +97,7 @@ for n_batch, w_decay, l_rate, only_vel in itertools.product(
         "distinct_x0": True,
         "overlapping": False,
         "filename": filename,
+        "normalizing": True,
     }
     run = wandb.init(
         project="kalman-net",
@@ -121,7 +125,7 @@ for n_batch, w_decay, l_rate, only_vel in itertools.product(
         # pipeline.NNTrain(
         #     n_examples, train_dataloader, n_cv, val_dataloader, only_vel=only_vel
         # )
-        pipeline.new_train(train_dataloader, val_dataloader, only_vel)
+        pipeline.new_train(train_dataloader, val_dataloader)
     # pipeline.NNTest(n_test, Y_test, X_test, x_test_0)
     except Exception as e:
         print(f"[Error]: {e}")

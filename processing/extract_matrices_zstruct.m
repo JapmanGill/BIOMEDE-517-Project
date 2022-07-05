@@ -2,18 +2,25 @@ clear;
 close all;
 
 %%
-runFile = 'Z:\Data\Monkeys\Joker\2021-04-12\Run-003\Z_Joker_2021-04-12_Run-003.mat';
-trial_range = 1000:2000;
-good_chans_SBP = [1,2,3,4,5,6,7,8,9,11,13,15,17,23,24,33,35,37,38,39,40,43,45,46,47,49,50,51,52,53,55,56,57,58,59,60,62,64,65,67,68,69,71,72,73,74,75,76,78,79,80,81,82,83,84,85,86,87,88,90,91,92,95,96];
+% runFile = 'Z:\Data\Monkeys\Joker\2021-04-12\Run-003\Z_Joker_2021-04-12_Run-003.mat';
+% trial_range = 1000:2000;
+% good_chans_SBP = [1,2,3,4,5,6,7,8,9,11,13,15,17,23,24,33,35,37,38,39,40,43,45,46,47,49,50,51,52,53,55,56,57,58,59,60,62,64,65,67,68,69,71,72,73,74,75,76,78,79,80,81,82,83,84,85,86,87,88,90,91,92,95,96];
 
 % runFile = 'Z:\Data\Monkeys\Joker\2022-02-23\Run-003\Z_Joker_2022-02-23_Run-003.mat';
 % trial_range = 50:450;
 % good_chans_SBP = 1:96;
 
 % runFile = 'Z:\Data\Monkeys\Joker\2022-06-13\Run-002\Z_Joker_2022-06-13_Run-002.mat';
-% trial_range = 50:450;
+% trial_range = 10:490;
 % good_chans_SBP = [1:3, 5:9,11,13,15,17,23,24,33,35,37:40,43,45:47,49:53,55:60,62,64,65,67:69,71:76,78,80:88,91:92,96];
 
+% runFile = 'Z:\Data\Monkeys\Joker\2022-04-15\Run-010\Z_Joker_2022-04-15_Run-010.mat';
+% trial_range = 20:980;
+% good_chans_SBP = 1:96;
+
+runFile = 'Z:\Data\Monkeys\Joker\2022-04-15\Run-011\Z_Joker_2022-04-15_Run-011.mat';
+trial_range = 20:980;
+good_chans_SBP = 1:96;
 
 binSize = 32; % Number of ms to bin data into
 featList = {'FingerAnglesTIMRL', 'NeuralFeature'}; % For use in getZFeats.m - these are the features we want from the z struct
@@ -30,7 +37,9 @@ feat = getZFeats(z, binSize, 'featList', featList); % Get features in binSize ms
 
 %% Transform to X and Y matrices
 % X contains pos and speed of finger flexions
-X = [feat{1}(:, 2) feat{1}(:, 4) feat{1}(:, 7) feat{1}(:, 9)];
+% X = [feat{1}(:, 2) feat{1}(:, 4) feat{1}(:, 7) feat{1}(:, 9)];
+% X contains only velocities.
+X = [feat{1}(:, 7) feat{1}(:, 9)];
 % Y contains all neurons
 Y = feat{2};
 Y = Y(:, good_chans_SBP);
@@ -166,7 +175,7 @@ for i = 2:size(X_train, 1)
 
     x_t_t = x_t_t1 + Kt * yt_tilde;
     x_values = [x_values x_t_t];
-    P_t_t = (eye(4) - Kt * C) * P_t_t1;
+    P_t_t = (eye(2) - Kt * C) * P_t_t1;
 end
 
 corr_kalman = diag(corr(double(X_train), x_values'))

@@ -45,7 +45,7 @@ class Pipeline_KF:
 
     def new_train(self, train_dataloader, cv_dataloader, vel_only=False):
         optimal_mse = 1000
-        optimal_correlation = torch.empty([4])
+        optimal_correlation = torch.empty([self.ssModel.m])
         optimal_epoch = -1
         for epoch in range(self.N_Epochs):
             print(f"Epoch {epoch+1}...")
@@ -53,21 +53,8 @@ class Pipeline_KF:
             self.model.train()
             print("Training...")
 
-            train_loss = torch.empty([len(train_dataloader), 4])
-            train_corr = torch.empty([len(train_dataloader), 4])
-            iteration_table = wandb.Table(
-                columns=[
-                    "iteration",
-                    "MSE pos idx",
-                    "MSE pos mrs",
-                    "MSE vel idx",
-                    "MSE vel mrs",
-                    "Corr pos idx",
-                    "Corr pos mrs",
-                    "Corr vel idx",
-                    "Corr vel mrs",
-                ]
-            )
+            train_loss = torch.empty([len(train_dataloader), self.ssModel.m])
+            train_corr = torch.empty([len(train_dataloader), self.ssModel.m])
             for i, (y, x, x_0) in enumerate(train_dataloader):
                 # Initialize hidden state: necessary for backprop
                 self.model.init_hidden()
@@ -86,28 +73,30 @@ class Pipeline_KF:
 
                 # Clip gradients to avoid exploding gradients
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.01)
+
                 self.optimizer.step()
                 # Compute correlation between x and x_hat
                 corr = compute_correlation(x.detach().cpu(), x_hat.detach().cpu())
                 train_corr[i, :] = torch.nanmean(torch.from_numpy(corr), 0)
                 print("Training", loss.item(), np.nanmean(corr, 0))
-                iteration_table.add_data(
-                    i, *torch.cat((train_loss[i, :], train_corr[i, :])).tolist()
-                )
+                # iteration_table.add_data(
+                #     i, *torch.cat((train_loss[i, :], train_corr[i, :])).tolist()
+                # )
 
             log_dict = {
-                "mse_train": np.nanmean(train_loss, 0).tolist(),
-                "corr_train": np.nanmean(train_corr, 0).tolist(),
+                "mse_train_all": np.nanmean(train_loss, 0).tolist(),
+                "mse_train": np.nanmean(train_loss),
+                "corr_train_all": np.nanmean(train_corr, 0).tolist(),
+                "corr_train": np.nanmean(train_corr),
                 "epoch": epoch,
-                "iteration_table": iteration_table,
             }
 
             # Validation
             self.model.eval()
             print("Validation...")
 
-            val_loss = torch.empty([len(cv_dataloader), 4])
-            val_corr = torch.empty([len(cv_dataloader), 4])
+            val_loss = torch.empty([len(cv_dataloader), self.ssModel.m])
+            val_corr = torch.empty([len(cv_dataloader), self.ssModel.m])
             for i, (y, x, x_0) in enumerate(cv_dataloader):
                 # Initialize sequence for KalmanFilter
                 self.model.InitSequence(x_0[0, :])
@@ -131,8 +120,10 @@ class Pipeline_KF:
 
             log_dict.update(
                 {
-                    "mse_cv": np.nanmean(val_loss, 0).tolist(),
-                    "corr_cv": np.nanmean(val_corr, 0).tolist(),
+                    "mse_cv_all": np.nanmean(val_loss, 0).tolist(),
+                    "corr_cv_all": np.nanmean(val_corr, 0).tolist(),
+                    "mse_cv": np.nanmean(val_loss),
+                    "corr_cv": np.nanmean(val_corr),
                     "optimal_mse_cv": optimal_mse,
                     "optimal_correlation_cv": optimal_correlation,
                     "optimal_epoch": optimal_epoch,
@@ -342,8 +333,8 @@ class Pipeline_KF:
                 x_out_test, test_target[j, :, :]
             ).item()
             # Compute correlation
-            corr = np.zeros(4)
-            for i in range(4):
+            corr = np.zeros(self.ssModel.m)
+            for i in range(self.ssModel.m):
                 corr[i] = np.corrcoef(
                     x_out_test.detach().cpu(), test_target[j, i, :].cpu()
                 )[0, 1]
