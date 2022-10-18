@@ -6,16 +6,18 @@ from Plot import Plot
 import numpy as np
 import wandb
 from utils.utils import compute_correlation
+from prettytable import PrettyTable
 
 
 class Pipeline_KF:
-    def __init__(self, Time, folderName, modelName):
+    def __init__(self, folder_name, modelName, good_chans, pred_type="v"):
         super().__init__()
-        self.Time = Time
-        self.folderName = folderName + "/"
+        self.folder_name = folder_name + "/"
         self.modelName = modelName
-        self.modelFileName = self.folderName + "model_" + self.modelName
-        self.PipelineName = self.folderName + "pipeline_" + self.modelName
+        self.modelFileName = self.folder_name + "model_" + self.modelName
+        self.PipelineName = self.folder_name + "pipeline_" + self.modelName
+        self.good_chans = torch.tensor(good_chans, dtype=torch.int)
+        self.pred_type = pred_type
 
     def save(self):
         torch.save(self, self.PipelineName)
@@ -43,31 +45,50 @@ class Pipeline_KF:
             self.model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay
         )
 
-    def new_train(self, train_dataloader, cv_dataloader, vel_only=False):
+    def new_train(self, train_dataloader, cv_dataloader, compute_val_every=100):
         optimal_mse = 1000
         optimal_correlation = torch.empty([self.ssModel.m])
         optimal_epoch = -1
+
+        self.count_parameters(self.model)
         for epoch in range(self.N_Epochs):
             print(f"Epoch {epoch+1}...")
-            # Training
-            self.model.train()
             print("Training...")
 
-            train_loss = torch.empty([len(train_dataloader), self.ssModel.m])
-            train_corr = torch.empty([len(train_dataloader), self.ssModel.m])
-            for i, (y, x, x_0) in enumerate(train_dataloader):
+            if self.pred_type == "v":
+                train_loss = torch.empty([len(train_dataloader), 2])
+                train_corr = torch.empty([len(train_dataloader), 2])
+            else:
+                train_loss = torch.empty([len(train_dataloader), 4])
+                train_corr = torch.empty([len(train_dataloader), 4])
+            for i, loader_dict in enumerate(train_dataloader):
+                # Training
+                self.model.train()
+                num_iteration = epoch * len(train_dataloader) + i + 1
+                y = loader_dict["chans"]
+                # Remove bad channels
+                y = torch.index_select(y, 1, self.good_chans)
+                x = loader_dict["states_hist"]
+                x_0 = loader_dict["initial_states"]
                 # Initialize hidden state: necessary for backprop
+                # FIXME: initialize one hidden state per sequence
                 self.model.init_hidden()
                 self.optimizer.zero_grad()
                 # Initialize sequence for KalmanFilter
-                self.model.InitSequence(x_0[0, :])
+                # self.model.InitSequence(x_0[0, :])
                 # Do forward pass of full batch
-                x_hat = self.model.forward_batch(y)
+                x_hat = self.model.forward_batch(y, x_0)
                 # Compute MSE loss
-                loss = self.loss_fn(x_hat, x)
-                if vel_only:
+                if self.pred_type == "v":
                     loss = self.loss_fn(x_hat[:, 2:, :], x[:, 2:, :])
-                train_loss[i, :] = ((x_hat - x) ** 2).mean(axis=[0, 2]).detach()
+                    train_loss[i, :] = (
+                        ((x_hat[:, 2:, :] - x[:, 2:, :]) ** 2)
+                        .mean(axis=[0, 2])
+                        .detach()
+                    )
+                else:
+                    loss = self.loss_fn(x_hat, x)
+                    train_loss[i, :] = ((x_hat - x) ** 2).mean(axis=[0, 2]).detach()
                 # Backpropagate and update weights
                 loss.backward()
 
@@ -76,20 +97,79 @@ class Pipeline_KF:
 
                 self.optimizer.step()
                 # Compute correlation between x and x_hat
-                corr = compute_correlation(x.detach().cpu(), x_hat.detach().cpu())
+                if self.pred_type == "v":
+                    corr = compute_correlation(
+                        x[:, 2:, :].detach().cpu(), x_hat[:, 2:, :].detach().cpu()
+                    )
+                else:
+                    corr = compute_correlation(x.detach().cpu(), x_hat.detach().cpu())
+
                 train_corr[i, :] = torch.nanmean(torch.from_numpy(corr), 0)
                 print("Training", loss.item(), np.nanmean(corr, 0))
-                # iteration_table.add_data(
-                #     i, *torch.cat((train_loss[i, :], train_corr[i, :])).tolist()
-                # )
 
-            log_dict = {
-                "mse_train_all": np.nanmean(train_loss, 0).tolist(),
-                "mse_train": np.nanmean(train_loss),
-                "corr_train_all": np.nanmean(train_corr, 0).tolist(),
-                "corr_train": np.nanmean(train_corr),
-                "epoch": epoch,
-            }
+                log_dict = {
+                    "iteration": num_iteration,
+                    "train_loss": loss.item(),
+                    "train_corr": np.nanmean(corr, 0),
+                    "mean_train_corr": np.nanmean(corr),
+                }
+
+                # TODO: Every N iterations, run model on validation set
+                if num_iteration % compute_val_every == 0:
+                    self.model.eval()
+                    print("Validating...")
+                    if self.pred_type == "v":
+                        val_loss = torch.empty([len(cv_dataloader), 2])
+                        val_corr = np.zeros([len(cv_dataloader), 2])
+                    else:
+                        val_loss = torch.empty([len(cv_dataloader), 4])
+                        val_corr = np.zeros([len(cv_dataloader), 4])
+                    for j, loader_dict in enumerate(cv_dataloader):
+                        y = loader_dict["chans_nohist"]
+                        # Remove bad channels
+                        y = torch.index_select(y, 1, self.good_chans)
+                        x = loader_dict["states"]
+                        x_0 = loader_dict["initial_states"]
+                        # Initialize hidden state: necessary for backprop
+                        self.model.init_hidden()
+                        # Initialize sequence for KalmanFilter
+                        self.model.InitSequence(x_0[0, :])
+                        # Run model on validation set
+                        # Output is (seq_len, m)
+                        x_hat = self.model.forward_sequence(y.T).T
+                        # Compute MSE loss and correlation
+                        if self.pred_type == "v":
+                            val_loss[j, :] = (
+                                ((x_hat[:, 2:] - x[:, 2:]) ** 2).mean(axis=[0]).detach()
+                            )
+                            val_corr[j, :] = compute_correlation(
+                                x[:, 2:].detach().cpu().T,
+                                x_hat[:, 2:].detach().cpu().T,
+                            )
+                        else:
+                            val_loss[j, :] = ((x_hat - x) ** 2).mean(axis=[0]).detach()
+                            val_corr[j, :] = compute_correlation(
+                                x.detach().cpu().T,
+                                x_hat.detach().cpu().T,
+                            )
+                    log_dict.update(
+                        {"val_loss": val_loss.mean(), "val_corr": val_corr.mean()}
+                    )
+                    print(
+                        f"Validation loss: {val_loss.mean()}, corr: {val_corr.mean()}"
+                    )
+
+                # Log to Wandb
+                wandb.log(log_dict)
+
+            # log_dict = {
+            #     "mse_train_all": np.nanmean(train_loss, 0).tolist(),
+            #     "mse_train": np.nanmean(train_loss),
+            #     "corr_train_all": np.nanmean(train_corr, 0).tolist(),
+            #     "corr_train": np.nanmean(train_corr),
+            #     "epoch": epoch,
+            # }
+            # wandb.log(log_dict)
 
             # Validation
             self.model.eval()
@@ -97,39 +177,57 @@ class Pipeline_KF:
 
             val_loss = torch.empty([len(cv_dataloader), self.ssModel.m])
             val_corr = torch.empty([len(cv_dataloader), self.ssModel.m])
-            for i, (y, x, x_0) in enumerate(cv_dataloader):
+            for i, loader_dict in enumerate(cv_dataloader):
+                y = loader_dict["chans_nohist"]
+                # Remove bad channels
+                y = torch.index_select(y, 1, self.good_chans).T
+                x = loader_dict["states"].T
+                x_0 = loader_dict["initial_states"]
                 # Initialize sequence for KalmanFilter
                 self.model.InitSequence(x_0[0, :])
                 # Do forward pass of full batch
-                x_hat = self.model.forward_batch(y)
+                x_hat = self.model.forward_sequence(y)
                 # Compute MSE loss
                 loss = self.loss_fn(x_hat, x)
-                val_loss[i, :] = ((x_hat - x) ** 2).mean(axis=[0, 2]).detach()
+                val_loss[i, :] = ((x_hat - x) ** 2).mean(axis=[0, 1]).detach()
                 # Compute correlation between x and x_hat
                 corr = compute_correlation(x.detach().cpu(), x_hat.detach().cpu())
                 val_corr[i, :] = torch.from_numpy(corr)
 
-            mse = np.nanmean(val_loss)
-            print("Validation", mse, np.nanmean(val_corr, 0).tolist())
+            mse = np.nanmean(val_loss.cpu())
+            print("Validation", mse, np.nanmean(val_corr.cpu(), 0).tolist())
             if mse < optimal_mse:
                 optimal_mse = mse
-                optimal_correlation = np.nanmean(val_corr, 0).tolist()
+                optimal_correlation = np.nanmean(val_corr.cpu(), 0).tolist()
                 optimal_epoch = epoch
                 torch.save(self.model, self.modelFileName)
                 print(f"Saving model with MSE {optimal_mse}")
 
-            log_dict.update(
-                {
-                    "mse_cv_all": np.nanmean(val_loss, 0).tolist(),
-                    "corr_cv_all": np.nanmean(val_corr, 0).tolist(),
-                    "mse_cv": np.nanmean(val_loss),
-                    "corr_cv": np.nanmean(val_corr),
-                    "optimal_mse_cv": optimal_mse,
-                    "optimal_correlation_cv": optimal_correlation,
-                    "optimal_epoch": optimal_epoch,
-                }
-            )
-            wandb.log(log_dict)
+            # log_dict.update(
+            #     {
+            #         "mse_cv_all": np.nanmean(val_loss, 0).tolist(),
+            #         "corr_cv_all": np.nanmean(val_corr, 0).tolist(),
+            #         "mse_cv": np.nanmean(val_loss),
+            #         "corr_cv": np.nanmean(val_corr),
+            #         "optimal_mse_cv": optimal_mse,
+            #         "optimal_correlation_cv": optimal_correlation,
+            #         "optimal_epoch": optimal_epoch,
+            #     }
+            # )
+            # wandb.log(log_dict)
+
+    def count_parameters(self, model):
+        table = PrettyTable(["Modules", "Parameters"])
+        total_params = 0
+        for name, parameter in model.named_parameters():
+            if not parameter.requires_grad:
+                continue
+            params = parameter.numel()
+            table.add_row([name, params])
+            total_params += params
+        print(table)
+        print(f"Total Trainable Params: {total_params}")
+        return total_params
 
     def NNTrain(
         self, n_Examples, train_dataloader, n_CV, cv_dataloader, only_vel=False
@@ -378,7 +476,7 @@ class Pipeline_KF:
 
     def PlotTrain_KF(self, MSE_KF_linear_arr, MSE_KF_dB_avg):
 
-        self.Plot = Plot(self.folderName, self.modelName)
+        self.Plot = Plot(self.folder_name, self.modelName)
 
         self.Plot.NNPlot_epochs(
             self.N_Epochs,

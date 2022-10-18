@@ -1,3 +1,4 @@
+from email import generator
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
@@ -20,6 +21,8 @@ import pybmi
 from pybmi.utils.ZTools import ZStructTranslator, getZFeats, zarray
 from pybmi.utils import ZTools
 from scipy.signal import find_peaks
+from timeit import default_timer as timer
+from prettytable import PrettyTable
 
 dtype = torch.float
 ltype = torch.long
@@ -136,6 +139,7 @@ class FingerDataset(Dataset):
         numdelays=3,
         positioninput=False,
         last_timestep_recent=True,
+        is_test=False,
     ):
         """
         Args:
@@ -151,6 +155,8 @@ class FingerDataset(Dataset):
         """
         Xtrain_temp = torch.tensor(X_neural).to(device).to(dtype)
         Ytrain_temp = torch.tensor(Y_fings).to(device).to(dtype)
+        self.numdelays = numdelays
+        self.is_test = is_test
 
         # (optional) append the previous position(s) as additional input features
         if positioninput:
@@ -202,20 +208,88 @@ class FingerDataset(Dataset):
             Xtrain = Xtrain1
             Ytrain = Ytrain1
 
-        # store the processed X/Y data
-        self.chan_states = (Xtrain, Ytrain)
+        # Y with history
+        Ytrain_hist = torch.zeros(
+            (int(Ytrain.shape[0]), int(Ytrain.shape[1]), numdelays),
+            device=device,
+            dtype=dtype,
+        )
+        Ytrain_hist[:, :, 0] = Ytrain
+        for k1 in range(numdelays - 1):
+            k = k1 + 1
+            Ytrain_hist[k:, :, k] = Ytrain[0:-k, :]
+        if last_timestep_recent:
+            # for RNNs, we want the last timestep to be the most recent data
+            Ytrain_hist = torch.flip(Ytrain_hist, (2,))
+
+        # Remove the timesteps that do not have enough history
+        Xtrain = Xtrain[numdelays - 1 :, :, :]
+        Ytrain_hist = Ytrain_hist[numdelays - 1 :, :, :]
+        # Initial states
+        initial_states = Ytrain[: -(numdelays - 1), :]
+        # Final states
+        Ytrain = Ytrain[numdelays - 1 :, :]
+        # X with no history
+        Xtrain_nohist = Xtrain[:, :, 0]
+        # Non overlapping sequences
+        non_overlap_idx = torch.arange(0, Xtrain.shape[0], numdelays)
+        Xtrain_nonoverlap = torch.index_select(Xtrain, 0, non_overlap_idx)
+        Ytrain_nonoverlap = torch.index_select(Ytrain_hist, 0, non_overlap_idx)
+        initial_states_nonoverlap = torch.index_select(
+            initial_states, 0, non_overlap_idx
+        )
+
+        # store the processed X/Y data and the initial states
+        self.chan_states = (
+            Xtrain,
+            Ytrain,
+            Ytrain_hist,
+            initial_states,
+            Xtrain_nohist,
+            Xtrain_nonoverlap,
+            Ytrain_nonoverlap,
+            initial_states_nonoverlap,
+        )
         self.transform = transform
 
     def __len__(self):
-        return len(self.chan_states[0])
+        # FIXME: for now, I'll always use non-overlapping sequences
+        if self.is_test:
+            return len(self.chan_states[0])
+        return len(self.chan_states[5])
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         chans = self.chan_states[0][idx, :]
         states = self.chan_states[1][idx, :]
+        states_hist = self.chan_states[2][idx, :]
+        initial_states = self.chan_states[3][idx, :]
+        chans_nohist = self.chan_states[4][idx, :]
+        if not self.is_test:
+            chans_nonoverlap = self.chan_states[5][idx, :]
+            states_nonoverlap = self.chan_states[6][idx, :]
+            initial_states_nonoverlap = self.chan_states[7][idx, :]
 
-        sample = {"states": states, "chans": chans}
+        if not self.is_test:
+            sample = {
+                "states": states,
+                "chans": chans,
+                "states_hist": states_hist,
+                "initial_states": initial_states,
+                "chans_nohist": chans_nohist,
+                "chans_nonoverlap": chans_nonoverlap,
+                "states_nonoverlap": states_nonoverlap,
+                "initial_states_nonoverlap": initial_states_nonoverlap,
+            }
+        else:
+            sample = {
+                "states": states,
+                "chans": chans,
+                "states_hist": states_hist,
+                "initial_states": initial_states,
+                "chans_nohist": chans_nohist,
+            }
 
         if self.transform:
             sample = self.transform(sample)
@@ -401,6 +475,19 @@ class BasicDataset(Dataset):
         return sample
 
 
+class CustomMSELoss(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, y_pred, y):
+        ctx.save_for_backward(y_pred, y)
+        return ((y - y_pred) ** 2).mean()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        y_pred, y = ctx.saved_tensors
+        grad_input = 2.0 * (y_pred - y) / y_pred.shape[0]
+        return grad_input, None
+
+
 def get_server_data_path():
     """
     Returns the server filepath based on what operating system is being used.
@@ -480,7 +567,6 @@ def load_training_data(
     position_input=False,
     pred_type="v",
     return_norm_params=False,
-    range_trials = None
 ):
     """Function to load in z-struct data and format for network training. Similar to getZfeats.
 
@@ -541,10 +627,6 @@ def load_training_data(
 
     if max_num_trials_train is not None:
         zstruct_train = zstruct_train[:max_num_trials_train]
-    
-    # TODO: add
-    # if range_trials is not None:
-    #     zstruct_train = zstruct_train[range_trials[0]:range_trials[1]]
 
     # get features
     feats_train = getZFeats(
@@ -598,12 +680,12 @@ def load_training_data(
             )
         else:
             x_train = (x_train - x_train.mean(axis=0)) / x_train.std(axis=0)
-            x_test = (x_test - x_test.mean(axis=0)) / x_test.std(axis=0)
+            x_test = (x_test - x_train.mean(axis=0)) / x_train.std(axis=0)
 
     # normalize Y (optional)
     if normalize_y:
         y_train = (y_train - y_train.mean(axis=0)) / y_train.std(axis=0)
-        y_test = (y_test - y_test.mean(axis=0)) / y_test.std(axis=0)
+        y_test = (y_test - y_train.mean(axis=0)) / y_train.std(axis=0)
 
     # mask out good chans, use only selected fingers
     x_train = mask * x_train
@@ -656,6 +738,7 @@ def load_training_data(
         positioninput=position_input,
         last_timestep_recent=True,
         Resamp=idx,
+        is_test=True,
     )
     dataset_test = FingerDataset(
         X_neural=x_test,
@@ -665,6 +748,7 @@ def load_training_data(
         numdelays=binshist,
         positioninput=position_input,
         last_timestep_recent=True,
+        is_test=True,
     )
     # setup dataloaders
     num_train = len(dataset_train)
@@ -672,7 +756,9 @@ def load_training_data(
     loader_train = DataLoader(
         dataset_train,
         batch_size=batch_size,
-        sampler=sampler.RandomSampler(range(num_train)),
+        sampler=sampler.RandomSampler(
+            range(num_train), generator=torch.Generator("cuda")
+        ),
         drop_last=True,
     )
     loader_test = DataLoader(
@@ -680,6 +766,7 @@ def load_training_data(
         batch_size=num_test,
         sampler=sampler.SequentialSampler(range(num_test)),
     )
+    print("holaasd")
 
     if return_norm_params:
         return loader_train, loader_test, x_mean, x_std
@@ -1177,7 +1264,7 @@ def run_model_forward(model, loader, multiday=False):
     with torch.no_grad():
         # get batch data (we assume there's only 1 batch) TODO: concat multiple batches
         for batch in loader:
-            x = batch["chans"].to(device=device)
+            x = batch["chans_nohist"].to(device=device)
             y = batch["states"].to(device=device)
             model.eval()
 
@@ -1185,12 +1272,13 @@ def run_model_forward(model, loader, multiday=False):
                 day_idx = batch["day_idx"].to(device=device)
                 yhat = model.forward(x, day_idx)  # forward pass for multiday training
             else:
-                yhat = model.forward(x)  # normal forward pass
+                yhat = model.forward(x, return_sequence=True)  # normal forward pass
 
             if isinstance(yhat, tuple):
                 # RNNs return y, h
                 yhat = yhat[0]
-            return y, yhat
+            # FIXME: change the transposed
+            return y, yhat.T
 
 
 def check_accuracy(model, loader, loss_func, normalize_y=False, multiday=False):
@@ -1233,11 +1321,15 @@ def plot_train_progress(
         tlim (int, optional):       Max time to plot. Defaults to 20.
         binsize (int, optional):    Defaults to 50.
     """
+    # get y/yhat predictions
+    y, yhat = run_model_forward(model, loader)
+    y = y.cpu().detach().numpy()
+    yhat = yhat.cpu().detach().numpy()
 
     if plot_train_progress.is_first_plot:
         # https://stackoverflow.com/questions/28269157/plotting-in-a-non-blocking-way-with-matplotlib
         plot_train_progress.fig, plot_train_progress.ax = plt.subplots(
-            nrows=3, ncols=4, figsize=(14, 6)
+            nrows=1 + y.shape[1], ncols=4, figsize=(14, 6)
         )
 
         # setup the yhat plot (bottom 2 rows)
@@ -1245,31 +1337,48 @@ def plot_train_progress(
         for row in plot_train_progress.ax[1:, :]:
             for ax in row:
                 ax.remove()
-        plot_train_progress.axyhat1 = plot_train_progress.fig.add_subplot(gs[1, :])
-        plot_train_progress.axyhat2 = plot_train_progress.fig.add_subplot(gs[2, :])
+        plot_train_progress.axyhatlist = []
+        for i in range(y.shape[1]):
+            plot_train_progress.axyhatlist.append(
+                plot_train_progress.fig.add_subplot(gs[i + 1, :])
+            )
 
         plt.ion()
         plt.show()
         plot_train_progress.is_first_plot = False
 
-    colors = ("#1f77b4", "#ff7f0e")
+    colors = (
+        "#1f77b4",
+        "#ff7f0e",
+        "#2ca02c",
+        "#d62728",
+        "#9467bd",
+        "#8c564b",
+        "#e377c2",
+        "#7f7f7f",
+        "#bcbd22",
+        "#17becf",
+    )
 
     # MSE plot - train
-    plot_train_progress.ax[0, 0].lines = []
+    for line in plot_train_progress.ax[0, 0].get_lines():  # ax.lines:
+        line.remove()
     plot_train_progress.ax[0, 0].plot(loss_history_train, color=[0.1, 0.1, 0.1])
     plot_train_progress.ax[0, 0].set_title("Train Loss")
     plot_train_progress.ax[0, 0].set_ylabel("MSE")
     plot_train_progress.ax[0, 0].set_xlabel("Iter")
 
     # MSE plot - validation
-    plot_train_progress.ax[0, 1].lines = []
+    for line in plot_train_progress.ax[0, 1].get_lines():  # ax.lines:
+        line.remove()
     plot_train_progress.ax[0, 1].plot(loss_history_val, color=[0.1, 0.1, 0.1])
     plot_train_progress.ax[0, 1].set_title("Val Loss - Normalized Y")
     plot_train_progress.ax[0, 1].set_ylabel("MSE")
     plot_train_progress.ax[0, 1].set_xlabel("Iter")
 
     # Corr plot
-    plot_train_progress.ax[0, 2].lines = []
+    for line in plot_train_progress.ax[0, 2].get_lines():  # ax.lines:
+        line.remove()
     plot_train_progress.ax[0, 2].set_prop_cycle(None)  # reset color order
     plot_train_progress.ax[0, 2].plot(corr_history_val)
     plot_train_progress.ax[0, 2].set_title(
@@ -1279,10 +1388,8 @@ def plot_train_progress(
     plot_train_progress.ax[0, 2].set_xlabel("Iter")
 
     # Velocity errors plot
-    plot_train_progress.ax[0, 3].lines = []
-    y, yhat = run_model_forward(model, loader)
-    y = y.cpu().detach().numpy()
-    yhat = yhat.cpu().detach().numpy()
+    for line in plot_train_progress.ax[0, 3].get_lines():  # ax.lines:
+        line.remove()
     Nbins = 21
     bins = np.linspace(-0.2, 0.2, Nbins)
     for i in range(y.shape[1]):
@@ -1306,21 +1413,16 @@ def plot_train_progress(
         for i in range(yhat.shape[1]):
             gain = np.std(y[:, i]) / np.std(yhat[:, i] - np.median(yhat[:, i]))
             yhat[:, i] = (yhat[:, i] - np.median(yhat[:, i])) * gain
-    plot_train_progress.axyhat1.lines = []
-    plot_train_progress.axyhat1.plot(t, y[:, 0], color=colors[0])
-    plot_train_progress.axyhat1.plot(t, yhat[:, 0], color=colors[1])
-    plot_train_progress.axyhat1.set_xlim((0, tlim))
-    plot_train_progress.axyhat1.set_ylim((1.2 * np.max(y[:, 0]), 1.2 * np.min(y[:, 0])))
-    plot_train_progress.axyhat1.legend(["True Vel", "NN Vel"], loc="upper right")
-    plot_train_progress.axyhat1.set_title(f"autoscaled = {autoscaleyhat}")
-    if y.shape[1] > 1:
-        plot_train_progress.axyhat2.lines = []
-        plot_train_progress.axyhat2.plot(t, y[:, 1], color=colors[0])
-        plot_train_progress.axyhat2.plot(t, yhat[:, 1], color=colors[1])
-        plot_train_progress.axyhat2.set_xlim((0, tlim))
-        plot_train_progress.axyhat2.set_ylim(
-            (1.2 * np.max(y[:, 1]), 1.2 * np.min(y[:, 1]))
-        )
+
+    for i, thisaxis in enumerate(plot_train_progress.axyhatlist):
+        for line in thisaxis.get_lines():
+            line.remove()
+        thisaxis.plot(t, y[:, i], color="dimgrey")
+        thisaxis.plot(t, yhat[:, i], color=colors[0])
+        thisaxis.set_xlim((0, tlim))
+        thisaxis.set_ylim((1.2 * np.max(y[:, i]), 1.2 * np.min(y[:, i])))
+    plot_train_progress.axyhatlist[0].legend(["True Vel", "NN Vel"], loc="upper right")
+    plot_train_progress.axyhatlist[0].set_title(f"autoscaled = {autoscaleyhat}")
 
     # Update the plot
     plot_train_progress.fig.tight_layout()
@@ -1442,10 +1544,12 @@ def train_model(
     noise_neural_std=None,
     noise_neural_walk_std=None,
     multiday=False,
+    use_history_y=False,
 ):
     """Trains any neural network model using standard gradient descent.
         Works with FNNs and RNNs, can sparsify the network, can add noise to train data, and can use multiday-dataloaders.
         If plot_progress is true, will plot train and validation loss as training progresses.
+        MODELS ARE UPDATED IN PLACE
 
     Args:
         model:                          pytorch model
@@ -1469,10 +1573,13 @@ def train_model(
         noise_neural_std (float, optional):      Adds a white noise to neural data to improve robustness
         noise_neural_walk_std (float, optional): Adds random walk white noise to neural data to improve robustness
         multiday (bool, optional):      If true, uses multiday info. Dataloaders and models must support it.
+        use_history_y (bool, optional):      If true, uses history for the y value, computing the loss over the full sequence.
 
     Returns:
-        [model, iter, valloss, corr]:   trained model, final iteration, validation loss, validation correlation, (train loss history, val loss history, val corr history) - optional
+        [iter, valloss, corr]:   trained model, final iteration, validation loss, validation correlation, (train loss history, val loss history, val corr history) - optional
     """
+
+    count_parameters(model)
 
     plotCnt = 0
     valloss = 0
@@ -1484,13 +1591,20 @@ def train_model(
     iter = 0
     sparse_step = 0
 
+    torch.autograd.set_detect_anomaly(True)
+
     for epoch in range(max_epoch):  # loop over the dataset multiple times
         running_loss = 0.0
         i = 0
 
         for batch in loader_train:
             x = batch["chans"]  # [batch_size x 96 x conv_size]
+            initial_states = None
             y = batch["states"]  # [batch_size x num_fings]
+            if use_history_y:
+                y = batch["states_hist"]  # [batch_size x num_fings x conv_size]
+                initial_states = batch["initial_states"]  # [batch_size x num_fings]
+
             x = x.to(device=device)
             y = y.to(device=device)
             model.train()
@@ -1512,16 +1626,32 @@ def train_model(
                 day_idx = batch["day_idx"].to(device=device)
                 yhat = model.forward(x, day_idx)  # forward pass for multiday training
             else:
-                yhat = model.forward(x)  # normal forward pass
+                start = timer()
+                yhat = model.forward(
+                    x, return_sequence=use_history_y, initial_states=initial_states
+                )  # normal forward pass
+                end = timer()
+            print(f"{end-start}")
 
             if isinstance(yhat, tuple):
                 # RNNs return y, h
                 yhat = yhat[0]
-
-            loss = loss_func(yhat, y)
+            loss = loss_func(yhat, y.double())
+            # Compute correlation
+            corrs = torch.zeros(y.shape[0], y.shape[1])
+            for i in range(y.shape[0]):
+                corrs[i, :] = torch.tensor(
+                    calc_corr(yhat.detach()[i, :, :].T, y.detach()[i, :, :].T)
+                )
+            print(f"[{iter+1}] loss: {loss:.5f}, corr: {corrs.mean(dim=0)}")
+            start = timer()
             loss.backward()
+            end = timer()
+            print(f"{end-start}")
             if sparsify_model:
                 model.zeroGradients()
+            # Clip gradients to avoid exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
             optimizer.step()
 
             # keep track of iteration and loss
@@ -1586,7 +1716,6 @@ def train_model(
                         ) if verbose else None
                         if return_history:
                             return (
-                                model,
                                 iter,
                                 valloss,
                                 corr,
@@ -1597,7 +1726,7 @@ def train_model(
                                 ),
                             )
                         else:
-                            return model, iter, valloss, corr
+                            return iter, valloss, corr
 
                 # if there's a max iteration then stop if we've reached it
                 elif max_iter is not None:
@@ -1607,7 +1736,6 @@ def train_model(
                         ) if verbose else None
                         if return_history:
                             return (
-                                model,
                                 iter,
                                 valloss,
                                 corr,
@@ -1618,20 +1746,19 @@ def train_model(
                                 ),
                             )
                         else:
-                            return model, iter, valloss, corr
+                            return iter, valloss, corr
 
         # loss_history_train.append(running_loss / i)
     print("*** final epoch is done ***") if verbose else None
     if return_history:
         return (
-            model,
             iter,
             valloss,
             corr,
             (loss_history_train, loss_history_val, corr_history_val),
         )
     else:
-        return model, iter, valloss, corr
+        return iter, valloss, corr
 
 
 def calc_gain_peaks(model, loader):
@@ -1777,10 +1904,8 @@ class OutputScaler:
         # TODO maybe add torch compatibility
 
         N = data.shape[0]
-        scaled_data = np.tile(self.gains, (N, 1)) * (
-            data + np.tile(self.biases, (N, 1))
-        )
-        # scaled_data = np.tile(self.gains, (N, 1)) * data + np.tile(self.biases, (N, 1))
+        # scaled_data = np.tile(self.gains, (N, 1)) * (data + np.tile(self.biases, (N, 1)))
+        scaled_data = np.tile(self.gains, (N, 1)) * data + np.tile(self.biases, (N, 1))
 
         # scaled_data = np.zeros_like(data)
         # # print(self.gains)
@@ -2538,3 +2663,17 @@ def train_part345_online(
                 stheta = calcGainRR(loader=loader_val, model=model, ConvSize=ConvSize)
                 print()
     return acc_history, iter_history, best_val
+
+
+def count_parameters(model):
+    table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        params = parameter.numel()
+        table.add_row([name, params])
+        total_params += params
+    print(table)
+    print(f"Total Trainable Params: {total_params}")
+    return total_params

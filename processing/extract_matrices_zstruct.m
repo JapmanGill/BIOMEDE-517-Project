@@ -6,9 +6,9 @@ close all;
 % trial_range = 1000:2000;
 % good_chans_SBP = [1,2,3,4,5,6,7,8,9,11,13,15,17,23,24,33,35,37,38,39,40,43,45,46,47,49,50,51,52,53,55,56,57,58,59,60,62,64,65,67,68,69,71,72,73,74,75,76,78,79,80,81,82,83,84,85,86,87,88,90,91,92,95,96];
 
-% runFile = 'Z:\Data\Monkeys\Joker\2022-02-23\Run-003\Z_Joker_2022-02-23_Run-003.mat';
-% trial_range = 50:450;
-% good_chans_SBP = 1:96;
+runFile = 'Z:\Data\Monkeys\Joker\2022-09-21\Run-002\Z_Joker_2022-09-21_Run-002.mat';
+trial_range = 50:350;
+good_chans_SBP = 1:96;
 
 % runFile = 'Z:\Data\Monkeys\Joker\2022-06-13\Run-002\Z_Joker_2022-06-13_Run-002.mat';
 % trial_range = 10:490;
@@ -18,9 +18,9 @@ close all;
 % trial_range = 20:980;
 % good_chans_SBP = 1:96;
 
-runFile = 'Z:\Data\Monkeys\Joker\2022-04-15\Run-011\Z_Joker_2022-04-15_Run-011.mat';
-trial_range = 20:980;
-good_chans_SBP = 1:96;
+% runFile = 'Z:\Data\Monkeys\Joker\2022-04-15\Run-011\Z_Joker_2022-04-15_Run-011.mat';
+% trial_range = 20:980;
+% good_chans_SBP = 1:96;
 
 binSize = 32; % Number of ms to bin data into
 featList = {'FingerAnglesTIMRL', 'NeuralFeature'}; % For use in getZFeats.m - these are the features we want from the z struct
@@ -100,20 +100,21 @@ x_hat = A * X_train_t_1;
 y_hat = (C * X_train')';
 corr_x = diag(corr(X_train_t', x_hat'))
 corr_y = diag(corr(Y_train, y_hat))
-mse_x = mean((X_train_t - x_hat).^2, 2);
-mse_y = mean((Y_train - y_hat).^2, 2);
+mse_x = mean((X_train_t - x_hat).^2, 2)
+mse_y = mean((Y_train - y_hat).^2, 1)
 
 %% Calculate non-linear transformation
-h = @(X, B) [X(:, 1) X(:, 2) sqrt(X(:, 1).^2 + X(:, 2).^2) X(:, 3) X(:, 4) sqrt(X(:, 3).^2 + X(:, 4).^2)] * B;
+% h = @(X, B) [X(:, 1) X(:, 2) sqrt(X(:, 1).^2 + X(:, 2).^2) X(:, 3) X(:, 4) sqrt(X(:, 3).^2 + X(:, 4).^2)] * B;
+% Only velocity
+h = @(X, B) [X(:, 1) X(:, 2) sqrt(X(:, 1).^2 + X(:, 2).^2)] * B;
 % Observation Model Parameters
-xB = [X_train(:, 1) X_train(:, 2) sqrt(X_train(:, 1).^2 + X_train(:, 2).^2) ...
-    X_train(:, 3) X_train(:, 4) sqrt(X_train(:, 3).^2 + X_train(:, 4).^2)];
+xB = [X_train(:, 1) X_train(:, 2) sqrt(X_train(:, 1).^2 + X_train(:, 2).^2)];
 B = (xB' * xB) \ xB' * Y_train;
 
 %% Evaluate non-linear transformation
 y_train_hat = h(X_train, B);
 corr_y = diag(corr(Y_train, y_train_hat))
-mse_y = mean((Y_train - y_hat).^2, 1)
+mse_y = mean((Y_train - y_train_hat).^2, 1)
 
 %% Add history
 % Normalize training data
@@ -152,24 +153,29 @@ last_row_train = length(X_train) - mod(length(X_train), bins_per_batch);
 last_row_val = length(X_val) - mod(length(X_val), bins_per_batch);
 last_row_test = length(X_test) - mod(length(X_test), bins_per_batch);
 bY_train = permute(reshape(Y_train(1:last_row_train, :)', length_y, bins_per_batch, []), [3, 1, 2]);
-bY_val = permute(reshape(Y_val(1:last_row_val, :)', length_y, bins_per_batch, []), [3, 1, 2]);
+% bY_val = permute(reshape(Y_val(1:last_row_val, :)', length_y, bins_per_batch, []), [3, 1, 2]);
 bY_test = permute(reshape(Y_test(1:last_row_test, :)', length_y, bins_per_batch, []), [3, 1, 2]);
 bX_train = permute(reshape(X_train(1:last_row_train, :)', length_x, bins_per_batch, []), [3, 1, 2]);
-bX_val = permute(reshape(X_val(1:last_row_val, :)', length_x, bins_per_batch, []), [3, 1, 2]);
+% bX_val = permute(reshape(X_val(1:last_row_val, :)', length_x, bins_per_batch, []), [3, 1, 2]);
 bX_test = permute(reshape(X_test(1:last_row_test, :)', length_x, bins_per_batch, []), [3, 1, 2]);
 bx_test_0 = bX_test(:,:,1);
 bx_train_0 = bX_train(:,:,1);
+% bx_val_0 = bX_val(:,:,1);
+
+% Forcing validation set to be only one long sequence
+bY_val(1,:,:) = Y_val';
+bX_val(1,:,:) = X_val';
 bx_val_0 = bX_val(:,:,1);
 
 %% Run Kalman filter
 P_t_t = W;
-x_t_t = X_train(1, :)';
+x_t_t = X_test(1, :)';
 x_values = [x_t_t];
 
-for i = 2:size(X_train, 1)
+for i = 2:size(X_test, 1)
     x_t_t1 = A * x_t_t;
     P_t_t1 = A * P_t_t * A' + W;
-    yt_tilde = Y_train(i, :)' - C * x_t_t1;
+    yt_tilde = Y_test(i, :)' - C * x_t_t1;
     St = C * P_t_t1 * C' + Q;
     Kt = P_t_t1 * C' / St;
 
@@ -178,5 +184,5 @@ for i = 2:size(X_train, 1)
     P_t_t = (eye(2) - Kt * C) * P_t_t1;
 end
 
-corr_kalman = diag(corr(double(X_train), x_values'))
-mse_kalman = mean((X_train - x_values').^2)
+corr_kalman = diag(corr(double(X_test), x_values'))
+mse_kalman = mean((X_test - x_values').^2)
