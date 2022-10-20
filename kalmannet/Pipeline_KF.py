@@ -124,7 +124,7 @@ class Pipeline_KF:
 
                 # TODO: Every N iterations, run model on validation set
                 if num_iteration % compute_val_every == 0:
-                    val_loss, val_corr = self.compute_val_loss(cv_dataloader)
+                    val_loss, val_corr = self.compute_validation_results(cv_dataloader)
                     log_dict.update(
                         {"val_loss": val_loss.mean(), "val_corr": val_corr.mean()}
                     )
