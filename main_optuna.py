@@ -162,22 +162,16 @@ def train_kalmannet(trial):
         good_chans_SBP_0idx,
         pred_type=trial.suggest_categorical("pred_type", ["pv", "v"]),
     )
-    sys_model = SystemModel(A, None, C, None, 0, 0, None)
     # sys_model.InitSequence(x_0, P_0)
-    pipeline.setssModel(sys_model)
     KNet_model = KalmanNetNN()
     KNet_model.Build(A, C)
-    pipeline.setModel(KNet_model)
-    pipeline.setTrainingParams(
+    pipeline.set_model(KNet_model)
+    pipeline.set_training_params(
         n_Epochs=20,
         learningRate=trial.suggest_float("l_rate", 1e-5, 1e-3, log=True),
         weightDecay=trial.suggest_float("w_decay", 1e-6, 1e-4, log=True),
     )
 
-    # try:
-    # pipeline.NNTrain(
-    #     n_examples, train_dataloader, n_cv, val_dataloader, only_vel=only_vel
-    # )
     config = dict(trial.params)
     config["trial.number"] = trial.number
     wandb.init(
@@ -187,7 +181,7 @@ def train_kalmannet(trial):
         config=config,
         reinit=True,
     )
-    val_loss = pipeline.new_train(
+    val_loss = pipeline.train(
         loader_train,
         loader_val,
         compute_val_every=20,
@@ -195,7 +189,6 @@ def train_kalmannet(trial):
         trial=trial,
     )
     return val_loss
-    # pipeline.NNTest(n_test, Y_test, X_test, x_test_0)
     # except Exception as e:
     #     print(f"[Error]: {e}")
     # finally:
@@ -206,12 +199,6 @@ def train_kalmannet(trial):
     #     del KNet_model
     # run.finish()
 
-
-today = datetime.today()
-now = datetime.now()
-strToday = today.strftime("%m_%d_%y")
-strNow = now.strftime("%H_%M_%S")
-strTime = strToday + "__" + strNow
 
 study = optuna.create_study()
 try:
