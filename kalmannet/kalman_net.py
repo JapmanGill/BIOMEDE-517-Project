@@ -8,10 +8,6 @@ from timeit import default_timer as timer
 
 
 class KalmanNetNN(torch.nn.Module):
-
-    ###################
-    ### Constructor ###
-    ###################
     def __init__(
         self,
         zero_hidden_state=False,
@@ -29,9 +25,9 @@ class KalmanNetNN(torch.nn.Module):
     #############
     ### Build ###
     #############
-    def Build(self, A, C):
+    def build(self, A, C, W=None, Q=None):
 
-        self.init_system_dynamics(A, C)
+        self.init_system_dynamics(A, C, W, Q)
 
         # Number of neurons in the 1st hidden layer
         h1_size = (self.m + self.n) * (10) * 8
@@ -109,16 +105,20 @@ class KalmanNetNN(torch.nn.Module):
     ##################################
     ### Initialize System Dynamics ###
     ##################################
-    def init_system_dynamics(self, A, C):
+    def init_system_dynamics(self, A, C, W, Q):
         # Set State Evolution Matrix
-        self.A = A.to(self.device, non_blocking=True)
-        self.A_T = torch.transpose(A, 0, 1)
+        self.A = A.to(self.device, non_blocking=True).float()
+        self.A_T = torch.transpose(A, 0, 1).to(self.device, non_blocking=True).float()
         self.m = self.A.size()[0]
 
         # Set Observation Matrix
-        self.C = C.to(self.device, non_blocking=True)
-        self.C_T = torch.transpose(C, 0, 1)
+        self.C = C.to(self.device, non_blocking=True).float()
+        self.C_T = torch.transpose(C, 0, 1).to(self.device, non_blocking=True).float()
         self.n = self.C.size()[0]
+
+        # Noise covariances
+        self.W = W.to(self.device, non_blocking=True).float()
+        self.Q = Q.to(self.device, non_blocking=True).float()
 
     # Initialize sequence
     def init_sequence(self, initial_state):
@@ -126,6 +126,8 @@ class KalmanNetNN(torch.nn.Module):
         self.x_prior = initial_state.to(self.device, non_blocking=True)
         self.x_posterior = initial_state.to(self.device, non_blocking=True)
         self.last_y = torch.zeros(self.n).to(self.device, non_blocking=True)
+
+        self.P = torch.clone(self.W)
 
     # Priors
     def step_prior(self):
@@ -140,9 +142,9 @@ class KalmanNetNN(torch.nn.Module):
         else:
             # TODO: auto detect if C has bias column
             # C comes with a bias column, so we need to add a 1 to the state vector
-            x_prior_bias = torch.ones(self.m + 1)
-            x_prior_bias[: self.m] = self.x_prior
-            self.y_prior = torch.matmul(self.C.float(), x_prior_bias)
+            # x_prior_bias = torch.ones(self.m + 1).to(device=self.device)
+            # x_prior_bias[: self.m] = self.x_prior
+            self.y_prior = torch.matmul(self.C.float(), self.x_prior)
 
     # Non linear function
     def h(self, x, B):
@@ -186,7 +188,10 @@ class KalmanNetNN(torch.nn.Module):
         self.step_prior()
 
         # Compute Kalman Gain
-        self.k_gain = self.step_KGain_est(y)
+        if self.reg_kf:
+            self.k_gain = self.kgain_regkf()
+        else:
+            self.k_gain = self.step_KGain_est(y)
 
         # Innovation
         y_obs = y
@@ -225,9 +230,13 @@ class KalmanNetNN(torch.nn.Module):
         l3_out = self.linear3(la2_out)
         return l3_out
 
-    ###############
-    ### Forward ###
-    ###############
+    def kgain_regkf(self):
+        self.P = self.A @ self.P @ self.A_T + self.W
+        k_gain = self.P @ self.C_T @ torch.inverse(self.C @ self.P @ self.C_T + self.Q)
+        self.P = (torch.eye(self.m).to(self.device) - k_gain @ self.C) @ self.P
+        return k_gain
+
+    # Forward
     def forward(self, yt):
         # yt must be: (n,)
         yt = yt.to(self.device, non_blocking=True)

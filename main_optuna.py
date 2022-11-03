@@ -1,102 +1,22 @@
-import wandb
-import os
 import sys
-
-sys.path.append("kalmannet")
-from Pipeline_KF import Pipeline_KF
-from KalmanNet import KalmanNetNN
-from Linear_sysmdl import SystemModel
-import torch
-from torch.utils.data import DataLoader
-import scipy.io as scio
-import numpy as np
 from datetime import datetime
-import itertools
-import traceback
+
+import joblib
+import scipy.io as sio
+import torch
 
 import optuna
-import joblib
-
-# from dataset import FingerFlexionDataset
-
+import wandb
 from pybmi.utils import TrainingUtils
+
+sys.path.append("kalmannet")
+
+from KalmanNet import KalmanNetNN
+from pipeline_kf import Pipeline_KF
 
 torch.set_default_dtype(torch.float32)
 
-# filename = "data/2022-04-15_run11/batch_data_32ms_12chan_50bins_nonoverlapping_onlyvel_longval.mat"
-# batch_data = scio.loadmat(filename)
-
-# F = torch.tensor(batch_data["A"]).float()
-# H = torch.tensor(batch_data["C"]).float()
-# Q = torch.tensor(batch_data["W"]).float()
-# R = torch.tensor(batch_data["Q"]).float()
-# B = torch.tensor(batch_data["B"]).float()
-
-
-# x_train_0 = torch.tensor(batch_data["bx_train_0"]).float()
-# x_val_0 = torch.tensor(batch_data["bx_val_0"]).float()
-# P_0 = Q
-# X_test = torch.tensor(batch_data["X_test"]).t().float()
-# Y_test = torch.tensor(batch_data["Y_test"]).t().float()
-# X_train = torch.tensor(batch_data["bX_train"]).float()
-# Y_train = torch.tensor(batch_data["bY_train"]).float()
-# X_val = torch.tensor(batch_data["bX_val"]).float()
-# Y_val = torch.tensor(batch_data["bY_val"]).float()
-# X_train_mean = torch.tensor(batch_data["X_train_mean"]).float()
-# X_train_std = torch.tensor(batch_data["X_train_std"]).float()
-# Y_train_mean = torch.tensor(batch_data["Y_train_mean"]).float()
-# Y_train_std = torch.tensor(batch_data["Y_train_std"]).float()
-
-# # Add extra dimension
-# X_test = X_test[None, :, :]
-# Y_test = Y_test[None, :, :]
-# x_test_0 = X_test[0, :, 0]
-# x_test_0 = x_test_0[:, None]
-# x_train_0 = x_train_0[:, :, None]
-# x_val_0 = x_val_0[:, :, None]
-
-# T = X_train.size()[2]
-# T_val = X_val.size()[2]
-# T_test = X_test.size()[2]
-
-# n_examples = X_train.size()[0]
-# n_cv = X_val.size()[0]
-# n_test = X_test.size()[0]
-
-# dataset_train = FingerFlexionDataset(
-#     X_train, Y_train, x_train_0, X_train_mean, X_train_std, Y_train_mean, Y_train_std
-# )
-# dataset_val = FingerFlexionDataset(
-#     X_val, Y_val, x_val_0, X_train_mean, X_train_std, Y_train_mean, Y_train_std
-# )
-
 # Load KF data
-import scipy.io as sio
-
-# num_model = 2
-# kf_model = sio.loadmat(f"Z:/Data/Monkeys/{monkey}/{date}/decodeParamsKF{num_model}.mat")
-# good_chans_SBP = kf_model["chansSbp"]
-# good_chans_SBP_0idx = [x - 1 for x in good_chans_SBP][0]
-# num_states = (
-#     len(fingers) if pred_type == "v" else 2 * len(fingers)
-# )  # 2 if velocity only, 4 if pos+vel
-
-# if pred_type == "v":
-#     A = torch.tensor(kf_model["xpcA"])[2:4, 2:4, 1]
-#     C = torch.tensor(kf_model["xpcC"])[: len(good_chans_SBP_0idx), 2:5, 1]
-# elif pred_type == "pv":
-# A = torch.tensor(kf_model["xpcA"])[:num_states, :num_states, 1]
-# C = torch.tensor(kf_model["xpcC"])[: len(good_chans_SBP_0idx), : num_states + 1, 1]
-# else:
-#     raise NotImplementedError
-
-# modelFolder = "KNet/"
-# epochs = 80
-# n_batches = [16]
-# l_rates = [1e-3]
-# w_decays = [0]
-# zero_hidden_states = [True]
-# non_linears = [False]
 
 today = datetime.today()
 now = datetime.now()
@@ -130,6 +50,7 @@ def train_kalmannet(trial):
         len(fingers) if pred_type == "v" else 2 * len(fingers)
     )  # 2 if velocity only, 4 if pos+vel
 
+    # FIXME: figure out what to do so that the data is not normalized but the network receives normalized data
     A = torch.tensor(kf_model["xpcA"])[:num_states, :num_states, 1]
     C = torch.tensor(kf_model["xpcC"])[: len(good_chans_SBP_0idx), : num_states + 1, 1]
 

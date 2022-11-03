@@ -223,6 +223,7 @@ class FingerDataset(Dataset):
             Ytrain_hist = torch.flip(Ytrain_hist, (2,))
 
         # Remove the timesteps that do not have enough history
+        # FIXME: need to check all this stuff
         Xtrain = Xtrain[numdelays - 1 :, :, :]
         Ytrain_hist = Ytrain_hist[numdelays - 1 :, :, :]
         # Initial states
@@ -230,14 +231,14 @@ class FingerDataset(Dataset):
         # Final states
         Ytrain = Ytrain[numdelays - 1 :, :]
         # X with no history
-        Xtrain_nohist = Xtrain[:, :, 0]
+        Xtrain_nohist = Xtrain[:, :, -1]
         # Non overlapping sequences
-        non_overlap_idx = torch.arange(0, Xtrain.shape[0], numdelays)
-        Xtrain_nonoverlap = torch.index_select(Xtrain, 0, non_overlap_idx)
-        Ytrain_nonoverlap = torch.index_select(Ytrain_hist, 0, non_overlap_idx)
-        initial_states_nonoverlap = torch.index_select(
-            initial_states, 0, non_overlap_idx
-        )
+        # non_overlap_idx = torch.arange(0, Xtrain.shape[0], numdelays).to(device=device)
+        # Xtrain_nonoverlap = torch.index_select(Xtrain, 0, non_overlap_idx)
+        # Ytrain_nonoverlap = torch.index_select(Ytrain_hist, 0, non_overlap_idx)
+        # initial_states_nonoverlap = torch.index_select(
+        #     initial_states, 0, non_overlap_idx
+        # )
 
         # store the processed X/Y data and the initial states
         self.chan_states = (
@@ -246,9 +247,9 @@ class FingerDataset(Dataset):
             Ytrain_hist,
             initial_states,
             Xtrain_nohist,
-            Xtrain_nonoverlap,
-            Ytrain_nonoverlap,
-            initial_states_nonoverlap,
+            # Xtrain_nonoverlap,
+            # Ytrain_nonoverlap,
+            # initial_states_nonoverlap,
         )
         self.transform = transform
 
@@ -266,30 +267,30 @@ class FingerDataset(Dataset):
         states_hist = self.chan_states[2][idx, :]
         initial_states = self.chan_states[3][idx, :]
         chans_nohist = self.chan_states[4][idx, :]
-        if not self.is_test:
-            chans_nonoverlap = self.chan_states[5][idx, :]
-            states_nonoverlap = self.chan_states[6][idx, :]
-            initial_states_nonoverlap = self.chan_states[7][idx, :]
+        # if not self.is_test:
+        #     chans_nonoverlap = self.chan_states[5][idx, :]
+        #     states_nonoverlap = self.chan_states[6][idx, :]
+        #     initial_states_nonoverlap = self.chan_states[7][idx, :]
 
-        if not self.is_test:
-            sample = {
-                "states": states,
-                "chans": chans,
-                "states_hist": states_hist,
-                "initial_states": initial_states,
-                "chans_nohist": chans_nohist,
-                "chans_nonoverlap": chans_nonoverlap,
-                "states_nonoverlap": states_nonoverlap,
-                "initial_states_nonoverlap": initial_states_nonoverlap,
-            }
-        else:
-            sample = {
-                "states": states,
-                "chans": chans,
-                "states_hist": states_hist,
-                "initial_states": initial_states,
-                "chans_nohist": chans_nohist,
-            }
+        # if not self.is_test:
+        #     sample = {
+        #         "states": states,
+        #         "chans": chans,
+        #         "states_hist": states_hist,
+        #         "initial_states": initial_states,
+        #         "chans_nohist": chans_nohist,
+        #         "chans_nonoverlap": chans_nonoverlap,
+        #         "states_nonoverlap": states_nonoverlap,
+        #         "initial_states_nonoverlap": initial_states_nonoverlap,
+        #     }
+        # else:
+        sample = {
+            "states": states,
+            "chans": chans,
+            "states_hist": states_hist,
+            "initial_states": initial_states,
+            "chans_nohist": chans_nohist,
+        }
 
         if self.transform:
             sample = self.transform(sample)
@@ -636,6 +637,27 @@ def load_training_data(
         removeFirstTrial=False,
     )
 
+    # FIXME: doing modifications to velocities as in Matlab Kalman Filter code
+    Y_train = feats_train["FingerAnglesTIMRL"][3:, :]
+    X_train = feats_train["NeuralFeature"][3:, :]
+    vel_idx = finger_idx[2:]
+    pos_idx = finger_idx[:2]
+    # switch velocity order to match vel output [pos(t) = pos(t-1) + vel(t)]
+    if (
+        np.count_nonzero(Y_train[0, vel_idx]) > 0
+        and np.count_nonzero(Y_train[-1, vel_idx]) == 0
+    ):
+        Y_train[:, vel_idx] = np.vstack(
+            [np.zeros((1, len(vel_idx))), np.diff(Y_train[:, pos_idx], axis=0)]
+        )
+    # zero low velocities
+    for j in vel_idx:
+        Y_train[np.abs(Y_train[:, j]) < 0.00001, j] = 0
+    # Our A matrix will predict velocity as units/1ms
+    # This is dependent on velocity integration output having a timestep of
+    # binsize and A(1,2) = binsize for position output as well
+    Y_train[:, vel_idx] = Y_train[:, vel_idx] / binsize
+
     if run_test is not None:
         # load in test the run data
         direc = os.path.join(serverdatapath, monkey, date, run_test)
@@ -651,18 +673,19 @@ def load_training_data(
             featList=["FingerAnglesTIMRL", "NeuralFeature"],
             removeFirstTrial=False,
         )
+        # FIXME: missing modifications
         x_train = feats_train["NeuralFeature"]
-        y_train = feats_train["FingerAnglesTIMRL"]
+        y_train = Y_train
         x_test = feats_test["NeuralFeature"]
         y_test = feats_test["FingerAnglesTIMRL"]
 
     else:
         # if no test run provided, split the training dataset into train/test
-        num_train = int(feats_train["NeuralFeature"].shape[0] * train_test_split)
-        x_train = feats_train["NeuralFeature"][:num_train, :]
-        y_train = feats_train["FingerAnglesTIMRL"][:num_train, :]
-        x_test = feats_train["NeuralFeature"][num_train:, :]
-        y_test = feats_train["FingerAnglesTIMRL"][num_train:, :]
+        num_train = int(X_train.shape[0] * train_test_split)
+        x_train = X_train[:num_train, :]
+        y_train = Y_train[:num_train, :]
+        x_test = X_train[num_train:, :]
+        y_test = Y_train[num_train:, :]
 
     # normalize X (optional)
     x_mean, x_std = x_train.mean(axis=0), x_train.std(axis=0)  # (optional return arg)

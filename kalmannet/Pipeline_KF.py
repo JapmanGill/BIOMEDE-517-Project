@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import random
 import time
-from Plot import Plot
 import numpy as np
 
 import wandb
@@ -211,17 +210,3 @@ class Pipeline_KF:
         print(table)
         print(f"Total Trainable Params: {total_params}")
         return total_params
-
-    def PlotTrain_KF(self, MSE_KF_linear_arr, MSE_KF_dB_avg):
-
-        self.Plot = Plot(self.folder_name, self.modelName)
-
-        self.Plot.NNPlot_epochs(
-            self.n_epochs,
-            MSE_KF_dB_avg,
-            self.MSE_test_dB_avg.cpu(),
-            self.MSE_cv_dB_epoch.cpu(),
-            self.MSE_train_dB_epoch.cpu(),
-        )
-
-        self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
