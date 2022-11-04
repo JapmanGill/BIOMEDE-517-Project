@@ -14,6 +14,10 @@ class KalmanNetNN(torch.nn.Module):
         nonlinear=False,
         non_linear_model=None,
         reg_kf=False,
+        h1_size=None,
+        h2_size=None,
+        hidden_dim=None,
+        gain_scaler=10000,
     ):
         super().__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -21,6 +25,11 @@ class KalmanNetNN(torch.nn.Module):
         self.nonlinear = nonlinear
         self.non_linear_model = non_linear_model
         self.reg_kf = reg_kf
+
+        self.h1_size = h1_size
+        self.h2_size = h2_size
+        self.hidden_dim = hidden_dim
+        self.gain_scaler = gain_scaler
 
     #############
     ### Build ###
@@ -30,10 +39,14 @@ class KalmanNetNN(torch.nn.Module):
         self.init_system_dynamics(A, C, W, Q)
 
         # Number of neurons in the 1st hidden layer
-        h1_size = (self.m + self.n) * (10) * 8
+        h1_size = (
+            self.h1_size if self.h1_size is not None else (self.m + self.n) * (10) * 8
+        )
 
         # Number of neurons in the 2nd hidden layer
-        h2_size = (self.m * self.n) * 1 * (4)
+        h2_size = (
+            self.h2_size if self.h2_size is not None else (self.m * self.n) * 1 * (4)
+        )
 
         self.init_kgain_net(h1_size, h2_size)
 
@@ -62,7 +75,8 @@ class KalmanNetNN(torch.nn.Module):
         # Input Dimension
         self.input_dim = h1_size
         # Hidden Dimension
-        self.hidden_dim = (self.m * self.m + self.n * self.n) * 1
+        if self.hidden_dim is None:
+            self.hidden_dim = (self.m * self.m + self.n * self.n) * 1
         # Number of Layers
         self.n_layers = 1
         # Batch Size. Can't be greater than 1, as we can't have batches of sequences
@@ -181,7 +195,7 @@ class KalmanNetNN(torch.nn.Module):
         end = timer()
         # print(f"KGain_step: {end - start}")
         # FIXME: there must be a better way to do this
-        KG = KG / 10000
+        KG = KG / self.gain_scaler
 
         # Reshape Kalman Gain to a Matrix and return
         return torch.reshape(KG, (self.m, self.n))
@@ -259,8 +273,10 @@ class KalmanNetNN(torch.nn.Module):
         y_batch = y_batch.to(self.device, non_blocking=True)
         x_out = torch.empty(y_batch.shape[0], self.m, y_batch.shape[2])
         for b in range(y_batch.shape[0]):
+            x_out[b, :, 0] = x_0[b, :]
             self.init_sequence(x_0[b, :])
-            x_out[b, :, :] = self.forward_sequence(y_batch[b, :, :])
+            # Initialize sequence and then pass forward the rest of it
+            x_out[b, :, 1:] = self.forward_sequence(y_batch[b, :, 1:])
         return x_out
 
     #########################

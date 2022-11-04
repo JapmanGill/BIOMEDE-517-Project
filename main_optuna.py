@@ -54,6 +54,8 @@ def train_kalmannet(trial):
     # FIXME: figure out what to do so that the data is not normalized but the network receives normalized data
     A = torch.tensor(kf_model["xpcA"])[:num_states, :num_states, 1]
     C = torch.tensor(kf_model["xpcC"])[: len(good_chans_SBP_0idx), :num_states, 1]
+    m = A.size()[0]
+    n = C.size()[0]
     [
         loader_train,
         loader_val,
@@ -68,10 +70,10 @@ def train_kalmannet(trial):
         isrefit=is_refit,
         fingers=fingers,
         binsize=binsize,
-        batch_size=trial.suggest_int("batch_size", 4, 32, step=4),
-        binshist=trial.suggest_int("conv_size", 20, 32, step=4),
+        batch_size=trial.suggest_int("batch_size", 4, 64, step=4),
+        binshist=trial.suggest_int("conv_size", 20, 80),
         normalize_x=trial.suggest_categorical("normalize_x", [True, False]),
-        normalize_y=trial.suggest_categorical("normalize_y", [True, False]),
+        normalize_y=False,
         norm_x_movavg_bins=norm_x_movavg_bins,
         train_test_split=train_test_split,  # only used if run_test is None
         pred_type="pv",
@@ -84,12 +86,26 @@ def train_kalmannet(trial):
         pred_type=trial.suggest_categorical("pred_type", ["pv", "v"]),
     )
     # sys_model.InitSequence(x_0, P_0)
-    KNet_model = KalmanNetNN()
+    KNet_model = KalmanNetNN(
+        h1_size=trial.suggest_int(
+            "h1_size", (m + n) * (10) * 1, (m + n) * (10) * 10, step=(m + n) * (10)
+        ),
+        h2_size=trial.suggest_int(
+            "h2_size", (m * n) * (4), (m * n) * (4) * 10, step=(m * n)
+        ),
+        hidden_dim=trial.suggest_int(
+            "hidden_dim",
+            (m * m + n * n) * 1,
+            (m * m + n * n) * 10,
+            step=(m * m + n * n),
+        ),
+        gain_scaler=trial.suggest_float("gain_scaler", 5e3, 5e4, log=True),
+    )
     KNet_model.build(A, C)
     pipeline.set_model(KNet_model)
     pipeline.set_training_params(
         n_epochs=20,
-        learning_rate=trial.suggest_float("l_rate", 1e-5, 1e-3, log=True),
+        learning_rate=trial.suggest_float("l_rate", 1e-6, 1e-3, log=True),
         weight_decay=trial.suggest_float("w_decay", 1e-6, 1e-4, log=True),
     )
 
@@ -106,7 +122,7 @@ def train_kalmannet(trial):
         loader_train,
         loader_val,
         compute_val_every=20,
-        stop_at_iterations=200,
+        stop_at_iterations=300,
         trial=trial,
     )
     return val_loss

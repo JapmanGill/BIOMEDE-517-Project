@@ -124,6 +124,9 @@ class Pipeline_KF:
 
                 train_corr[i, :] = torch.nanmean(torch.from_numpy(corr), 0)
                 print("Training", loss.item(), np.nanmean(corr, 0))
+                if np.isnan(loss.item()):
+                    print("NAN loss")
+                    raise optuna.exceptions.TrialPruned()
 
                 log_dict = {
                     "iteration": num_iteration,
@@ -132,14 +135,18 @@ class Pipeline_KF:
                     "mean_train_corr": np.nanmean(corr),
                 }
 
-                # TODO: Every N iterations, run model on validation set
+                # Every N iterations, run model on validation set
                 if num_iteration % compute_val_every == 0:
                     val_loss, val_corr = self.compute_validation_results(cv_dataloader)
                     log_dict.update(
-                        {"val_loss": val_loss.mean(), "val_corr": val_corr.mean()}
+                        {
+                            "val_loss": val_loss.mean(),
+                            "val_corr": val_corr.mean(),
+                            "all_val_corr": np.nanmean(val_corr, 0),
+                        }
                     )
                     print(
-                        f"Validation loss: {val_loss.mean()}, corr: {val_corr.mean()}"
+                        f"Validation loss: {val_loss.mean()}, corr: {np.nanmean(val_corr, 0)}"
                     )
                     if trial is not None:
                         trial.report(val_loss.mean(), num_iteration)
@@ -158,6 +165,7 @@ class Pipeline_KF:
                 ):
                     val_loss, val_corr = self.compute_validation_results(cv_dataloader)
                     wandb.run.summary["final val_loss"] = val_loss.mean()
+                    wandb.run.summary["final val_corr"] = val_corr.mean()
                     wandb.run.summary["state"] = "completed"
                     wandb.finish(quiet=True)
                     return val_loss.mean()
@@ -195,22 +203,22 @@ class Pipeline_KF:
             self.model.init_sequence(x_0[0, :])
             # Run model on validation set
             # Output is (seq_len, m)
-            x_hat = self.model.forward_sequence(y.T).T.to(self.model.device)
+            x_hat = self.model.forward_sequence(y[1:, :].T).T.to(self.model.device)
             # Compute MSE loss and correlation
             if self.pred_type == "v":
                 val_loss[j, :] = (
-                    ((x_hat[:, 2:4] - x[:, 2:4]) ** 2).mean(axis=[0]).detach()
+                    ((x_hat[:, 2:4] - x[1:, 2:4]) ** 2).mean(axis=[0]).detach()
                 )
                 val_corr[j, :] = compute_correlation(
-                    x[:, 2:4].detach().cpu().T,
+                    x[1:, 2:4].detach().cpu().T,
                     x_hat[:, 2:4].detach().cpu().T,
                 )
             else:
                 val_loss[j, :] = (
-                    ((x_hat[:, :4] - x[:, :4]) ** 2).mean(axis=[0]).detach()
+                    ((x_hat[:, :4] - x[1:, :4]) ** 2).mean(axis=[0]).detach()
                 )
                 val_corr[j, :] = compute_correlation(
-                    x[:, :4].detach().cpu().T,
+                    x[1:, :4].detach().cpu().T,
                     x_hat[:, :4].detach().cpu().T,
                 )
         return val_loss, val_corr
