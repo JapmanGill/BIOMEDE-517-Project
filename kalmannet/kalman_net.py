@@ -51,10 +51,10 @@ class KalmanNetNN(torch.nn.Module):
         ### Input Layer ###
         ###################
         # Linear Layer
-        self.linear1 = torch.nn.Linear(in_dim, h1_size, bias=True)
+        self.linear1 = torch.nn.Linear(in_dim, h1_size, bias=True).to(self.device)
 
         # ReLU (Rectified Linear Unit) Activation Function
-        self.relu1 = torch.nn.ReLU()
+        self.relu1 = torch.nn.ReLU().to(self.device)
 
         ###########
         ### GRU ###
@@ -83,7 +83,9 @@ class KalmanNetNN(torch.nn.Module):
             ).to(self.device, non_blocking=True)
 
         # Initialize GRU Layer
-        self.rnn_GRU = nn.GRU(self.input_dim, self.hidden_dim, self.n_layers)
+        self.rnn_GRU = nn.GRU(self.input_dim, self.hidden_dim, self.n_layers).to(
+            self.device
+        )
         # Initialize GRU with kaiming instead of uniform initialization
         # for name, param in self.rnn_GRU.named_parameters():
         #     if "weight_ih" in name:
@@ -94,13 +96,15 @@ class KalmanNetNN(torch.nn.Module):
         #         param.data.fill_(0)
 
         # Hidden layer
-        self.linear2 = torch.nn.Linear(self.hidden_dim, h2_size, bias=True)
+        self.linear2 = torch.nn.Linear(self.hidden_dim, h2_size, bias=True).to(
+            self.device
+        )
 
         # ReLU (Rectified Linear Unit) Activation Function
-        self.relu2 = torch.nn.ReLU()
+        self.relu2 = torch.nn.ReLU().to(self.device)
 
         # Output layer
-        self.linear3 = torch.nn.Linear(h2_size, out_dim, bias=True)
+        self.linear3 = torch.nn.Linear(h2_size, out_dim, bias=True).to(self.device)
 
     ##################################
     ### Initialize System Dynamics ###
@@ -117,8 +121,8 @@ class KalmanNetNN(torch.nn.Module):
         self.n = self.C.size()[0]
 
         # Noise covariances
-        self.W = W.to(self.device, non_blocking=True).float()
-        self.Q = Q.to(self.device, non_blocking=True).float()
+        self.W = W.to(self.device, non_blocking=True).float() if W is not None else None
+        self.Q = Q.to(self.device, non_blocking=True).float() if Q is not None else None
 
     # Initialize sequence
     def init_sequence(self, initial_state):
@@ -127,7 +131,7 @@ class KalmanNetNN(torch.nn.Module):
         self.x_posterior = initial_state.to(self.device, non_blocking=True)
         self.last_y = torch.zeros(self.n).to(self.device, non_blocking=True)
 
-        self.P = torch.clone(self.W)
+        self.P = torch.clone(self.W) if self.W is not None else None
 
     # Priors
     def step_prior(self):

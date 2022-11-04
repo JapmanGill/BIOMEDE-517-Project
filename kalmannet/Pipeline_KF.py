@@ -73,9 +73,15 @@ class Pipeline_KF:
                 num_iteration = epoch * len(train_dataloader) + i + 1
                 y = loader_dict["chans"]
                 # Remove bad channels
-                y = torch.index_select(y, 1, self.good_chans)
+                y = torch.index_select(y, 1, self.good_chans.to(self.model.device))
                 x = loader_dict["states_hist"]
+                x = torch.cat(
+                    [x, torch.ones(x.shape[0], 1, x.shape[2]).to(self.model.device)], 1
+                )
                 x_0 = loader_dict["initial_states"]
+                x_0 = torch.cat(
+                    [x_0, torch.ones(x_0.shape[0], 1).to(self.model.device)], 1
+                )
                 # Initialize hidden state: necessary for backprop
                 # FIXME: initialize one hidden state per sequence
                 self.model.init_hidden()
@@ -83,18 +89,22 @@ class Pipeline_KF:
                 # Initialize sequence for KalmanFilter
                 # self.model.InitSequence(x_0[0, :])
                 # Do forward pass of full batch
-                x_hat = self.model.forward_batch(y, x_0)
+                x_hat = self.model.forward_batch(y, x_0).to(device=self.model.device)
                 # Compute MSE loss
                 if self.pred_type == "v":
-                    loss = self.loss_fn(x_hat[:, 2:, :], x[:, 2:, :])
+                    loss = self.loss_fn(x_hat[:, 2:4, :], x[:, 2:4, :])
                     train_loss[i, :] = (
-                        ((x_hat[:, 2:, :] - x[:, 2:, :]) ** 2)
+                        ((x_hat[:, 2:4, :] - x[:, 2:4, :]) ** 2)
                         .mean(axis=[0, 2])
                         .detach()
                     )
                 else:
-                    loss = self.loss_fn(x_hat, x)
-                    train_loss[i, :] = ((x_hat - x) ** 2).mean(axis=[0, 2]).detach()
+                    loss = self.loss_fn(x_hat[:, :4, :], x[:, :4, :])
+                    train_loss[i, :] = (
+                        ((x_hat[:, :4, :] - x[:, :4, :]) ** 2)
+                        .mean(axis=[0, 2])
+                        .detach()
+                    )
                 # Backpropagate and update weights
                 loss.backward()
 
@@ -105,10 +115,12 @@ class Pipeline_KF:
                 # Compute correlation between x and x_hat
                 if self.pred_type == "v":
                     corr = compute_correlation(
-                        x[:, 2:, :].detach().cpu(), x_hat[:, 2:, :].detach().cpu()
+                        x[:, 2:4, :].detach().cpu(), x_hat[:, 2:4, :].detach().cpu()
                     )
                 else:
-                    corr = compute_correlation(x.detach().cpu(), x_hat.detach().cpu())
+                    corr = compute_correlation(
+                        x[:, :4, :].detach().cpu(), x_hat[:, :4, :].detach().cpu()
+                    )
 
                 train_corr[i, :] = torch.nanmean(torch.from_numpy(corr), 0)
                 print("Training", loss.item(), np.nanmean(corr, 0))
@@ -171,30 +183,35 @@ class Pipeline_KF:
         for j, loader_dict in enumerate(cv_dataloader):
             y = loader_dict["chans_nohist"]
             # Remove bad channels
-            y = torch.index_select(y, 1, self.good_chans)
+            y = torch.index_select(y, 1, self.good_chans.to(self.model.device))
             x = loader_dict["states"]
+            x = torch.cat([x, torch.ones(x.shape[0], 1).to(self.model.device)], 1)
             x_0 = loader_dict["initial_states"]
+            x_0 = torch.cat([x_0, torch.ones(x_0.shape[0], 1).to(self.model.device)], 1)
+
             # Initialize hidden state: necessary for backprop
             self.model.init_hidden()
             # Initialize sequence for KalmanFilter
-            self.model.InitSequence(x_0[0, :])
+            self.model.init_sequence(x_0[0, :])
             # Run model on validation set
             # Output is (seq_len, m)
-            x_hat = self.model.forward_sequence(y.T).T
+            x_hat = self.model.forward_sequence(y.T).T.to(self.model.device)
             # Compute MSE loss and correlation
             if self.pred_type == "v":
                 val_loss[j, :] = (
-                    ((x_hat[:, 2:] - x[:, 2:]) ** 2).mean(axis=[0]).detach()
+                    ((x_hat[:, 2:4] - x[:, 2:4]) ** 2).mean(axis=[0]).detach()
                 )
                 val_corr[j, :] = compute_correlation(
-                    x[:, 2:].detach().cpu().T,
-                    x_hat[:, 2:].detach().cpu().T,
+                    x[:, 2:4].detach().cpu().T,
+                    x_hat[:, 2:4].detach().cpu().T,
                 )
             else:
-                val_loss[j, :] = ((x_hat - x) ** 2).mean(axis=[0]).detach()
+                val_loss[j, :] = (
+                    ((x_hat[:, :4] - x[:, :4]) ** 2).mean(axis=[0]).detach()
+                )
                 val_corr[j, :] = compute_correlation(
-                    x.detach().cpu().T,
-                    x_hat.detach().cpu().T,
+                    x[:, :4].detach().cpu().T,
+                    x_hat[:, :4].detach().cpu().T,
                 )
         return val_loss, val_corr
 

@@ -11,7 +11,7 @@ from pybmi.utils import TrainingUtils
 
 sys.path.append("kalmannet")
 
-from KalmanNet import KalmanNetNN
+from kalman_net import KalmanNetNN
 from pipeline_kf import Pipeline_KF
 
 torch.set_default_dtype(torch.float32)
@@ -49,11 +49,11 @@ def train_kalmannet(trial):
     num_states = (
         len(fingers) if pred_type == "v" else 2 * len(fingers)
     )  # 2 if velocity only, 4 if pos+vel
+    num_states += 1
 
     # FIXME: figure out what to do so that the data is not normalized but the network receives normalized data
     A = torch.tensor(kf_model["xpcA"])[:num_states, :num_states, 1]
-    C = torch.tensor(kf_model["xpcC"])[: len(good_chans_SBP_0idx), : num_states + 1, 1]
-
+    C = torch.tensor(kf_model["xpcC"])[: len(good_chans_SBP_0idx), :num_states, 1]
     [
         loader_train,
         loader_val,
@@ -85,12 +85,12 @@ def train_kalmannet(trial):
     )
     # sys_model.InitSequence(x_0, P_0)
     KNet_model = KalmanNetNN()
-    KNet_model.Build(A, C)
+    KNet_model.build(A, C)
     pipeline.set_model(KNet_model)
     pipeline.set_training_params(
-        n_Epochs=20,
-        learningRate=trial.suggest_float("l_rate", 1e-5, 1e-3, log=True),
-        weightDecay=trial.suggest_float("w_decay", 1e-6, 1e-4, log=True),
+        n_epochs=20,
+        learning_rate=trial.suggest_float("l_rate", 1e-5, 1e-3, log=True),
+        weight_decay=trial.suggest_float("w_decay", 1e-6, 1e-4, log=True),
     )
 
     config = dict(trial.params)

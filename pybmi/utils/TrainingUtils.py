@@ -780,7 +780,7 @@ def load_training_data(
         dataset_train,
         batch_size=batch_size,
         sampler=sampler.RandomSampler(
-            range(num_train), generator=torch.Generator("cuda")
+            range(num_train), generator=torch.Generator("cpu")
         ),
         drop_last=True,
     )
