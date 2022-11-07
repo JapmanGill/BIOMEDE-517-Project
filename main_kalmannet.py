@@ -34,16 +34,19 @@ run_test = None  #'Run-003'
 binsize = 32
 fingers = [2, 4]
 is_refit = False
-train_test_split = 0.9
+train_test_split = 0.8
 norm_x_movavg_bins = None
 pred_type = "pv"
 run_reg_kf = True
-lrate = 0
-wdecay = 0
-batch_size = 16
-conv_size = 50
+lrate = 0.0002973485
+wdecay = 0.0000172
+batch_size = 48
+conv_size = 70
 normalize_x = False
 normalize_y = False
+h1_size = 510
+h2_size = 1560
+hidden_dim = 845
 
 num_model = 2
 kf_model = sio.loadmat(f"Z:/Data/Monkeys/{monkey}/{date}/decodeParamsKF{num_model}.mat")
@@ -77,7 +80,9 @@ C = torch.tensor(kf_model["xpcC"])[: len(good_chans_SBP_0idx), :num_states, 1]
     return_norm_params=False,
 )
 # sys_model.InitSequence(x_0, P_0)
-knet_model = KalmanNetNN(reg_kf=run_reg_kf)
+knet_model = KalmanNetNN(
+    binsize, reg_kf=run_reg_kf, h1_size=h1_size, h2_size=h2_size, hidden_dim=hidden_dim
+)
 knet_model.build(A, C)
 pipeline = Pipeline_KF(
     "models",
@@ -86,21 +91,40 @@ pipeline = Pipeline_KF(
     pred_type="pv",
 )
 # sys_model.InitSequence(x_0, P_0)
-KNet_model = KalmanNetNN()
+KNet_model = KalmanNetNN(binsize)
 KNet_model.build(A, C)
 pipeline.set_model(KNet_model)
 pipeline.set_training_params(
     n_epochs=2,
-    learning_rate=1e-4,
-    weight_decay=1e-6,
+    learning_rate=1e-3,
+    weight_decay=0,
 )
-wandb.init(
-    project="kalman-net",
-    entity="lhcubillos",
-    group=f"test_{strTime}",
-    config={},
-)
+# wandb.init(
+#     project="kalman-net",
+#     entity="lhcubillos",
+#     name=f"test_{strTime}",
+#     config={},
+# )
 val_loss = pipeline.train(
-    loader_train, loader_val, compute_val_every=10, stop_at_iterations=50
+    loader_train, loader_val, compute_val_every=10, stop_at_iterations=5
+)
+torch.save(KNet_model, f"models/KNet_fingflexion_{strTime}.mdl")
+training_outputs = {
+    "val_loss": val_loss,
+}
+training_inputs = {
+    "pred_type": pred_type,
+}
+TrainingUtils.save_nn_decoder(
+    monkey,
+    date,
+    KNet_model,
+    None,
+    binsize,
+    fingers,
+    good_chans_SBP,
+    training_inputs,
+    training_outputs,
+    fname_prefix="KNet",
 )
 print("hola")

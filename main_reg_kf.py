@@ -79,7 +79,7 @@ Q = torch.tensor(kf_model["Q"][0][1])
     return_norm_params=False,
 )
 # sys_model.InitSequence(x_0, P_0)
-knet_model = KalmanNetNN(reg_kf=run_reg_kf)
+knet_model = KalmanNetNN(binsize, reg_kf=run_reg_kf)
 knet_model.build(A, C, W, Q)
 
 # wandb.init(
@@ -121,4 +121,23 @@ for j, loader_dict in enumerate(loader_val):
         x[1:, : (num_states - 1)].detach().cpu().T,
         x_hat[:, : (num_states - 1)].detach().cpu().T,
     )
+
+training_outputs = {
+    "val_corr": val_corr,
+}
+training_inputs = {
+    "pred_type": pred_type,
+}
+TrainingUtils.save_nn_decoder(
+    monkey,
+    date,
+    knet_model,
+    None,
+    binsize,
+    fingers,
+    good_chans_SBP,
+    training_inputs,
+    training_outputs,
+    fname_prefix="KNet",
+)
 print("hola")

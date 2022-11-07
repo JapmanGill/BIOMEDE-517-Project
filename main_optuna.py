@@ -87,6 +87,7 @@ def train_kalmannet(trial):
     )
     # sys_model.InitSequence(x_0, P_0)
     KNet_model = KalmanNetNN(
+        binsize,
         h1_size=trial.suggest_int(
             "h1_size", (m + n) * (10) * 1, (m + n) * (10) * 10, step=(m + n) * (10)
         ),
@@ -121,8 +122,8 @@ def train_kalmannet(trial):
     val_loss = pipeline.train(
         loader_train,
         loader_val,
-        compute_val_every=20,
-        stop_at_iterations=300,
+        compute_val_every=15,
+        stop_at_iterations=150,
         trial=trial,
     )
     return val_loss
@@ -139,6 +140,6 @@ def train_kalmannet(trial):
 
 study = optuna.create_study()
 try:
-    study.optimize(train_kalmannet, n_trials=100)
+    study.optimize(train_kalmannet, n_trials=200)
 finally:
     joblib.dump(study, f"optuna/study_{strTime}.pkl")

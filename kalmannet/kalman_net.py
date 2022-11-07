@@ -10,6 +10,7 @@ from timeit import default_timer as timer
 class KalmanNetNN(torch.nn.Module):
     def __init__(
         self,
+        bin_size,
         zero_hidden_state=False,
         nonlinear=False,
         non_linear_model=None,
@@ -30,6 +31,7 @@ class KalmanNetNN(torch.nn.Module):
         self.h2_size = h2_size
         self.hidden_dim = hidden_dim
         self.gain_scaler = gain_scaler
+        self.bin_size = bin_size
 
     #############
     ### Build ###

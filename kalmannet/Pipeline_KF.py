@@ -157,17 +157,19 @@ class Pipeline_KF:
                             raise optuna.exceptions.TrialPruned()
 
                 # Log to Wandb
-                wandb.log(log_dict)
+                if wandb.run is not None:
+                    wandb.log(log_dict)
 
                 if (
                     stop_at_iterations is not None
                     and num_iteration == stop_at_iterations
                 ):
                     val_loss, val_corr = self.compute_validation_results(cv_dataloader)
-                    wandb.run.summary["final val_loss"] = val_loss.mean()
-                    wandb.run.summary["final val_corr"] = val_corr.mean()
-                    wandb.run.summary["state"] = "completed"
-                    wandb.finish(quiet=True)
+                    if wandb.run is not None:
+                        wandb.run.summary["final val_loss"] = val_loss.mean()
+                        wandb.run.summary["final val_corr"] = val_corr.mean()
+                        wandb.run.summary["state"] = "completed"
+                        wandb.finish(quiet=True)
                     return val_loss.mean()
 
             # mse = np.nanmean(val_loss.cpu())
